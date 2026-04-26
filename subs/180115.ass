@@ -1,0 +1,23 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 640
+PlayResY: 352
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Italic, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,28,&H00FFFFFF,&H00000000,&HC0000000,1,0,3,2,2,30,30,18,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+
+Dialogue: 0,0:00:00.00,0:00:07.00,Default,,0,0,0,,No one wants to train with me. They seem too weak.
+Dialogue: 0,0:00:07.00,0:00:14.00,Default,,0,0,0,,You just haven't realized your full potential yet. Trust me, Mano. You'll grow stronger.
+Dialogue: 0,0:00:22.00,0:00:24.00,Default,,0,0,0,,Mano, you wanna do it?
+Dialogue: 0,0:00:25.00,0:00:27.00,Default,,0,0,0,,I won't lose this time, Hugo.
+Dialogue: 0,0:00:31.00,0:00:41.00,Default,,0,0,0,,That move you taught me was amazing. You should have seen the look on Hugo's face.
+Dialogue: 0,0:00:41.00,0:00:51.00,Default,,0,0,0,,Who's Hugo? What do you mean? He's my friend and rival. I told you about him before. Don't you remember?
+Dialogue: 0,0:00:52.00,0:00:56.00,Default,,0,0,0,,Why should I care? I don't wanna talk to you. Leave me alone.
+Dialogue: 0,0:00:57.00,0:01:00.00,Default,,0,0,0,,What's wrong? Why are you angry?
+Dialogue: 0,0:01:03.00,0:01:10.00,Default,,0,0,0,,I'm looking for a Yasuo with a Vindi shaped like a black butterfly on his left arm. Have you seen him?

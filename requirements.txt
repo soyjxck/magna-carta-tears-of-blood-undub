@@ -1,0 +1,5 @@
+# Standard library is enough for AFS + SofDec parsing.
+# External tools (must be on PATH):
+#   ffmpeg    — frame extraction / probing
+#   mkisofs   — ISO repacking (cdrtools)
+#   xdelta3   — generate distributable patch

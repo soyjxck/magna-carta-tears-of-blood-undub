@@ -1,0 +1,16 @@
+roms/
+work/
+build/
+*.iso
+*.SFD
+*.AFS
+*.adx
+*.m1v
+*.elf
+*.bin
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+venv/
+.claude/

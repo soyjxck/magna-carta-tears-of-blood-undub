@@ -1,0 +1,19 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 640
+PlayResY: 352
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Italic, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,28,&H00FFFFFF,&H00000000,&HC0000000,1,0,3,2,2,30,30,18,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+
+Dialogue: 0,0:00:00.00,0:00:07.00,Default,,0,0,0,,Oh, that. That's what creates the barrier around the forest.
+Dialogue: 0,0:00:07.00,0:00:15.00,Default,,0,0,0,,Wow, that's incredible! So, all the paths around here look exactly the same?
+Dialogue: 0,0:00:15.00,0:00:20.00,Default,,0,0,0,,Thanks to that, no outsiders can get into Fugue.
+Dialogue: 0,0:00:20.00,0:00:25.00,Default,,0,0,0,,I bet you do something to protect the sacred treasure too, right?
+Dialogue: 0,0:00:25.00,0:00:31.00,Default,,0,0,0,,Of course we do. We all take turns guarding it.

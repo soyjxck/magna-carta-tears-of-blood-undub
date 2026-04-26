@@ -1,0 +1,21 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 640
+PlayResY: 352
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Italic, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,28,&H00FFFFFF,&H00000000,&HC0000000,1,0,3,2,2,30,30,18,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+
+Dialogue: 0,0:00:00.00,0:00:14.60,Default,,0,0,0,,Sensei! Sensei! I'm sorry!
+Dialogue: 0,0:00:14.60,0:00:17.80,Default,,0,0,0,,Mano, hurry. You have to get out of here.
+Dialogue: 0,0:00:17.80,0:00:19.80,Default,,0,0,0,,But...
+Dialogue: 0,0:00:19.80,0:00:23.80,Default,,0,0,0,,Listen carefully. It's not your fault.
+Dialogue: 0,0:00:23.80,0:00:25.80,Default,,0,0,0,,Sensei...
+Dialogue: 0,0:00:26.60,0:00:31.60,Default,,0,0,0,,Run, Mano. No matter what happens, stay alive.
+Dialogue: 0,0:00:33.60,0:00:36.60,Default,,0,0,0,,Let's go, Mano. It's dangerous here.
