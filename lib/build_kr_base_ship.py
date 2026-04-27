@@ -16,23 +16,27 @@ from afs import Afs, write_afs
 
 # Extensions that hold English text in USA / Korean text in KR.
 # Swap to USA for English UI/dialog/items.
+# All identified by inspecting one sample of each ext and looking for English
+# strings — see the SHIP.AFS extension reference notes.
 USA_TEXT_EXTS = (
-    ".cht",  # dialog text scripts
-    ".tui",  # UI labels
-    ".itm",  # item names + descriptions
-    ".gft",  # gift / inventory data
-    ".cha",  # character data (names, bios)
-    ".abi",  # ability definitions
-    ".sgi",  # ?
-    ".cdg",  # ?
-    ".mdg",  # ?
-    ".dod",  # all 40 differ — likely text-bearing
-    ".cls",  # class definitions
-    ".ecd",  # ?
-    ".att",  # ?
-    ".nod",  # ?
-    ".val",  # ?
-    ".fds",  # ?
+    ".cht",  # dialog text scripts ("What was the Captain thinking?")
+    ".tui",  # UI labels ("Party", "Change members participating in battle.")
+    ".itm",  # item names + descriptions ("Battered Sword")
+    ".gft",  # gift dialog ("Can I really have it?")
+    ".cha",  # character data ("Calintz")
+    ".abi",  # ability definitions ("Rush Blade")
+    ".sgi",  # combat-style descriptions ("A style that relies on super-quick strikes")
+    ".cdg",  # talisman effects ("H:High Spirits")
+    ".mdg",  # monster bestiary descriptions ("Geckra. This winged lizard-like...")
+    ".dod",  # character titles ("Seiin Dojo Master")
+    ".cls",  # class data
+    ".ecd",  # event/cutscene dialog ("We need to get out of this cave.")
+    ".att",  # attribute/stat data
+    ".nod",  # area names ("Zekart's House", "Mountain Ruins")
+    ".val",  # value data
+    ".fds",  # friend/team dialog ("Calintz, let's go!")
+    ".odd",  # side-quest dialog
+    ".pod",  # talisman descriptions, 148 × 12,328 B (1.8 MB total)
 )
 
 
