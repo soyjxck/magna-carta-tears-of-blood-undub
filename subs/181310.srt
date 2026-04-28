@@ -1,7 +1,0 @@
-1
-00:00:00,000 --> 00:00:05,000
-See, I improved, right?
-
-2
-00:00:05,000 --> 00:00:09,000
-That was nothing to brag about. You still got a lot to learn.
