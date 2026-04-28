@@ -1,28 +1,31 @@
-"""Magna Carta: Tears of Blood — Korean undub patch builder.
+"""Magna Carta: Tears of Blood — Korean / Japanese undub patch builder.
 
 Subcommands
 -----------
-  setup        Extract both ISOs (work/usa, work/kr) and build ffmpeg with libass.
+  setup        Extract USA + source-region ISOs and build ffmpeg with libass.
 
-  cutscenes    Build undubbed SFDs (KR video + KR audio + English ASS burned
-               in) for every cutscene. Reads pre-generated subs from `subs/`.
-               Outputs land under build/cutscenes/.
+  cutscenes    Build undubbed SFDs (source-region video + audio + English
+               ASS burned in) for every cutscene. Reads pre-generated subs
+               from `subs/<source>/`. Outputs land under build/cutscenes-<source>/.
 
   build-iso    Build the full undub ISO:
-                 Phase 1 (cutscenes): patch in re-encoded SFDs from
-                 build/cutscenes/ (KR video + English burned subs).
-                 Phase 3 (in-game): swap KR LINEAR.AFS + KR MUSIC.AFS for
-                 Korean voice/level data, and swap a KR-base hybrid SHIP.AFS
-                 with USA text overlays for English UI/dialog/items.
+                 Phase 1 (cutscenes): patch in re-encoded SFDs.
+                 Phase 3 (in-game): swap source LINEAR.AFS + MUSIC.AFS for
+                 the chosen voice/level data, and a source-base hybrid
+                 SHIP.AFS with USA text overlays for English UI/dialog/items.
                  USA boot ELF + USA FILE.AFS stay (USA engine + fonts).
-               Output: build/magna-carta-tears-of-blood-undub.iso
+               Output: build/magna-carta-tears-of-blood-undub-<source>.iso
 
-  xdelta       xdelta3 -e -9 -S djw  USA ISO -> patched ISO.
+  xdelta       xdelta3 -e -9 -S djw  USA ISO -> patched ISO ->
+               build/magna-carta-tears-of-blood-undub-<source>.xdelta
 
   full         setup + cutscenes + build-iso + xdelta.
 
-Inputs come from `roms/Magna Carta - Tears of Blood (USA).iso` and
-`roms/Magna Carta - Jinhongui Seongheun (Korea).iso` by default.
+Source region (--source kr | jp; default kr) selects which region's voice +
+scene data is used for the undub. Inputs:
+  roms/Magna Carta - Tears of Blood (USA).iso
+  roms/Magna Carta - Jinhongui Seongheun (Korea).iso        (--source kr)
+  roms/Magna Carta (Japan).iso                              (--source jp)
 """
 from __future__ import annotations
 
@@ -40,15 +43,31 @@ from iso import patch_iso
 from ship import build as build_ship
 
 DEFAULT_USA_ISO = ROOT / "roms" / "Magna Carta - Tears of Blood (USA).iso"
-DEFAULT_KR_ISO = ROOT / "roms" / "Magna Carta - Jinhongui Seongheun (Korea).iso"
+DEFAULT_SOURCE_ISOS = {
+    "kr": ROOT / "roms" / "Magna Carta - Jinhongui Seongheun (Korea).iso",
+    "jp": ROOT / "roms" / "Magna Carta (Japan).iso",
+}
+SUBS_DIRS = {"kr": ROOT / "subs" / "korean", "jp": ROOT / "subs" / "japanese"}
+
 WORK = ROOT / "work"
 BUILD = ROOT / "build"
-SUBS = ROOT / "subs"
-PATCHED_ISO = BUILD / "magna-carta-tears-of-blood-undub.iso"
-PATCH_XDELTA = BUILD / "magna-carta-tears-of-blood-undub.xdelta"
-KR_LINEAR = WORK / "kr" / "LINEAR.AFS"
-KR_MUSIC = WORK / "kr" / "MUSIC.AFS"
-SHIP_HYBRID = BUILD / "kr_base" / "SHIP.AFS"
+
+
+def _paths(source: str) -> dict[str, Path]:
+    """Resolve every per-region path from a single `source` flag."""
+    src_root = WORK / source
+    return {
+        "src_root": src_root,
+        "src_iso": DEFAULT_SOURCE_ISOS[source],
+        "src_linear": src_root / "LINEAR.AFS",
+        "src_music": src_root / "MUSIC.AFS",
+        "src_ship": src_root / "SHIP.AFS",
+        "subs_dir": SUBS_DIRS[source],
+        "cutscenes_dir": BUILD / f"cutscenes-{source}",
+        "ship_hybrid": BUILD / f"{source}_base" / "SHIP.AFS",
+        "patched_iso": BUILD / f"magna-carta-tears-of-blood-undub-{source}.iso",
+        "patch_xdelta": BUILD / f"magna-carta-tears-of-blood-undub-{source}.xdelta",
+    }
 
 
 def _ensure_extracted(iso: Path, dest: Path) -> None:
@@ -60,8 +79,9 @@ def _ensure_extracted(iso: Path, dest: Path) -> None:
 
 
 def cmd_setup(args: argparse.Namespace) -> int:
+    p = _paths(args.source)
     _ensure_extracted(args.usa_iso, WORK / "usa")
-    _ensure_extracted(args.kr_iso, WORK / "kr")
+    _ensure_extracted(p["src_iso"], p["src_root"])
     print(f"  ensuring ffmpeg with libass ...")
     bin_path = find_or_build_ffmpeg()
     print(f"  ffmpeg ready: {bin_path}")
@@ -69,16 +89,18 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
 
 def cmd_cutscenes(args: argparse.Namespace) -> int:
-    out = run_cutscenes(work_dir=BUILD / "cutscenes")
-    print(f"\nbuilt {len(out)} cutscenes")
+    p = _paths(args.source)
+    out = run_cutscenes(work_dir=p["cutscenes_dir"], src_root=p["src_root"], subs_dir=p["subs_dir"])
+    print(f"\nbuilt {len(out)} cutscenes for source={args.source}")
     return 0
 
 
 def cmd_build_iso(args: argparse.Namespace) -> int:
+    p = _paths(args.source)
     replacements: dict[str, Path] = {}
 
-    # Phase 1: cutscenes (re-encoded KR video + English burned subs)
-    cutscene_dir = BUILD / "cutscenes"
+    # Phase 1: cutscenes (re-encoded source video + audio with EN subs burned in)
+    cutscene_dir = p["cutscenes_dir"]
     if cutscene_dir.exists():
         for sub in cutscene_dir.iterdir():
             if not sub.is_dir():
@@ -86,43 +108,44 @@ def cmd_build_iso(args: argparse.Namespace) -> int:
             candidate = sub / f"{sub.name}_undub.SFD"
             if not candidate.exists():
                 continue
-            # Find which subdir (MOVIE18 / MOVIE99) the original lives in.
             for movie_dir in ("MOVIE18", "MOVIE99"):
                 if (WORK / "usa" / movie_dir / f"{sub.name}.SFD").exists():
                     replacements[f"/{movie_dir}/{sub.name}.SFD"] = candidate
                     break
-        print(f"  Phase 1: {len([k for k in replacements if k.startswith('/MOVIE')])} cutscene SFD swaps queued")
+        n_movies = len([k for k in replacements if k.startswith('/MOVIE')])
+        print(f"  Phase 1: {n_movies} cutscene SFD swaps queued")
     else:
-        print(f"  Phase 1: no cutscenes built — run `patch.py cutscenes` first if you want them")
+        print(f"  Phase 1: no cutscenes built — run `patch.py cutscenes --source {args.source}` first")
 
     # Phase 3: build hybrid SHIP.AFS, then queue the AFS swaps
-    print(f"  Phase 3: building KR-base hybrid SHIP.AFS with USA text overlays")
-    build_ship()
-    if not SHIP_HYBRID.exists():
-        sys.exit(f"hybrid SHIP.AFS missing at {SHIP_HYBRID}")
-    if not KR_LINEAR.exists() or not KR_MUSIC.exists():
-        sys.exit("KR LINEAR.AFS / MUSIC.AFS missing — run `patch.py setup` first")
-    replacements["/LINEAR.AFS"] = KR_LINEAR
-    replacements["/MUSIC.AFS"] = KR_MUSIC
-    replacements["/SHIP.AFS"] = SHIP_HYBRID
+    print(f"  Phase 3: building {args.source}-base hybrid SHIP.AFS with USA text overlays")
+    build_ship(out_path=p["ship_hybrid"], src_ship=p["src_ship"])
+    if not p["ship_hybrid"].exists():
+        sys.exit(f"hybrid SHIP.AFS missing at {p['ship_hybrid']}")
+    if not p["src_linear"].exists() or not p["src_music"].exists():
+        sys.exit(f"source LINEAR.AFS / MUSIC.AFS missing — run `patch.py setup --source {args.source}` first")
+    replacements["/LINEAR.AFS"] = p["src_linear"]
+    replacements["/MUSIC.AFS"] = p["src_music"]
+    replacements["/SHIP.AFS"] = p["ship_hybrid"]
 
     print(f"\n  applying {len(replacements)} swaps to ISO ...")
-    in_place, relocated = patch_iso(args.usa_iso, PATCHED_ISO, replacements)
-    print(f"\nbuilt {PATCHED_ISO} ({PATCHED_ISO.stat().st_size:,} B)")
+    in_place, relocated = patch_iso(args.usa_iso, p["patched_iso"], replacements)
+    print(f"\nbuilt {p['patched_iso']} ({p['patched_iso'].stat().st_size:,} B)")
     print(f"  in-place: {in_place}, relocated: {relocated}")
     return 0
 
 
 def cmd_xdelta(args: argparse.Namespace) -> int:
-    if not PATCHED_ISO.exists():
-        sys.exit("run `patch.py build-iso` first")
+    p = _paths(args.source)
+    if not p["patched_iso"].exists():
+        sys.exit(f"run `patch.py build-iso --source {args.source}` first")
     subprocess.run(
         ["xdelta3", "-e", "-9", "-S", "djw", "-f",
-         "-s", str(args.usa_iso), str(PATCHED_ISO), str(PATCH_XDELTA)],
+         "-s", str(args.usa_iso), str(p["patched_iso"]), str(p["patch_xdelta"])],
         check=True,
     )
-    print(f"\nbuilt {PATCH_XDELTA} ({PATCH_XDELTA.stat().st_size:,} B)")
-    print(f"apply with:  xdelta3 -d -s '<USA ISO>' {PATCH_XDELTA.name} <output.iso>")
+    print(f"\nbuilt {p['patch_xdelta']} ({p['patch_xdelta'].stat().st_size:,} B)")
+    print(f"apply with:  xdelta3 -d -s '<USA ISO>' {p['patch_xdelta'].name} <output.iso>")
     return 0
 
 
@@ -136,12 +159,13 @@ def cmd_full(args: argparse.Namespace) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(prog="patch.py", description=__doc__.splitlines()[0])
+    ap.add_argument("--source", choices=["kr", "jp"], default="kr",
+                    help="source region for voice/scene data (default: kr)")
     ap.add_argument("--usa-iso", type=Path, default=DEFAULT_USA_ISO)
-    ap.add_argument("--kr-iso", type=Path, default=DEFAULT_KR_ISO)
 
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("setup", help="extract ISOs + build ffmpeg-libass").set_defaults(func=cmd_setup)
-    sub.add_parser("cutscenes", help="build all undubbed SFDs from subs/").set_defaults(func=cmd_cutscenes)
+    sub.add_parser("cutscenes", help="build all undubbed SFDs from subs/<source>/").set_defaults(func=cmd_cutscenes)
     sub.add_parser("build-iso", help="patch USA ISO with cutscenes + AFS swaps").set_defaults(func=cmd_build_iso)
     sub.add_parser("xdelta", help="USA ISO -> patched ISO -> xdelta3").set_defaults(func=cmd_xdelta)
     sub.add_parser("full", help="setup + cutscenes + build-iso + xdelta").set_defaults(func=cmd_full)

@@ -1,0 +1,19 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 640
+PlayResY: 352
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Italic, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,28,&H00FFFFFF,&H00000000,&HC0000000,1,0,3,2,2,30,30,18,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+
+Dialogue: 0,0:00:00.00,0:00:07.00,Default,,0,0,0,,I can't believe you kept practicing with those blisters.
+Dialogue: 0,0:00:07.00,0:00:10.00,Default,,0,0,0,,Being reckless won't make you stronger.
+Dialogue: 0,0:00:10.00,0:00:16.00,Default,,0,0,0,,But I want to be like Hugo.
+Dialogue: 0,0:00:16.00,0:00:19.00,Default,,0,0,0,,I'm tired of not being good enough.
+Dialogue: 0,0:00:19.00,0:00:21.00,Default,,0,0,0,,Mano.

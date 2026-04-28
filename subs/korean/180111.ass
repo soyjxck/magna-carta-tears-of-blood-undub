@@ -1,0 +1,25 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 640
+PlayResY: 352
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Italic, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,28,&H00FFFFFF,&H00000000,&HC0000000,1,0,3,2,2,30,30,18,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+
+Dialogue: 0,0:00:00.00,0:00:07.00,Default,,0,0,0,,Magna Carta, that's the power that can cause earthquakes or make it rain.
+Dialogue: 0,0:00:07.00,0:00:12.00,Default,,0,0,0,,But you need a bunch of sacred treasures to make it work, right?
+Dialogue: 0,0:00:12.00,0:00:21.00,Default,,0,0,0,,Yes, the more of the sacred treasures you possess, the more power you can call forth.
+Dialogue: 0,0:00:21.00,0:00:27.00,Default,,0,0,0,,If we could use the Magna Carta, then we could get revenge on the Yossil.
+Dialogue: 0,0:00:27.00,0:00:33.00,Default,,0,0,0,,You will never be able to use the Magna Carta if you think like that.
+Dialogue: 0,0:00:33.00,0:00:35.00,Default,,0,0,0,,Why not?
+Dialogue: 0,0:00:35.00,0:00:40.00,Default,,0,0,0,,The Magna Carta is unbelievably powerful.
+Dialogue: 0,0:00:40.00,0:00:47.00,Default,,0,0,0,,Unless you have the necessary training, you won't be able to use it.
+Dialogue: 0,0:00:47.00,0:00:49.00,Default,,0,0,0,,Then I'll become stronger.
+Dialogue: 0,0:00:49.00,0:00:56.00,Default,,0,0,0,,Listen, Mano, the Magna Carta can be evoked regardless of one's strength.
+Dialogue: 0,0:00:56.00,0:01:01.00,Default,,0,0,0,,But first, you must understand how this world works.

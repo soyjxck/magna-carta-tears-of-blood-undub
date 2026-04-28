@@ -39,12 +39,12 @@ class CutsceneJob:
     name: str               # e.g. "181818"
     rel: str                # e.g. "MOVIE18/181818.SFD"
     usa_sfd: Path
-    kr_sfd: Path
+    src_sfd: Path
     ass: Path | None        # None if no subs file or it's empty
     usa_size: int
-    kr_size: int
+    src_size: int
     usa_dur: float
-    kr_dur: float
+    src_dur: float
 
     @property
     def has_subs(self) -> bool:
@@ -56,7 +56,7 @@ class CutsceneJob:
     @property
     def needs_undub(self) -> bool:
         """True if the SFDs differ between regions (audio swap is meaningful)."""
-        return self.usa_size != self.kr_size or self.usa_sfd.read_bytes() != self.kr_sfd.read_bytes()
+        return self.usa_size != self.src_size or self.usa_sfd.read_bytes() != self.src_sfd.read_bytes()
 
 
 def _ffprobe_duration(path: Path) -> float:
@@ -68,34 +68,37 @@ def _ffprobe_duration(path: Path) -> float:
 
 
 def discover_jobs(usa_root: Path = ROOT / "work" / "usa",
-                  kr_root: Path = ROOT / "work" / "kr",
-                  subs_dir: Path = ROOT / "subs") -> list[CutsceneJob]:
+                  src_root: Path = ROOT / "work" / "kr",
+                  subs_dir: Path = ROOT / "subs" / "korean") -> list[CutsceneJob]:
+    """Walk USA's MOVIE18/MOVIE99, pair each SFD with the same-named SFD in
+    `src_root` (the source region to take video+audio from), and pair each
+    with a `<basename>.ass` subtitle file under `subs_dir` if present."""
     jobs: list[CutsceneJob] = []
     for sub in ("MOVIE18", "MOVIE99"):
         usa_dir = usa_root / sub
-        kr_dir = kr_root / sub
+        src_dir = src_root / sub
         if not usa_dir.is_dir():
             continue
         for usa in sorted(usa_dir.glob("*.SFD")):
-            kr = kr_dir / usa.name
-            if not kr.exists():
+            src = src_dir / usa.name
+            if not src.exists():
                 continue
             ass = subs_dir / f"{usa.stem}.ass"
             jobs.append(CutsceneJob(
                 name=usa.stem,
                 rel=f"{sub}/{usa.name}",
                 usa_sfd=usa,
-                kr_sfd=kr,
+                src_sfd=src,
                 ass=ass if ass.exists() else None,
                 usa_size=usa.stat().st_size,
-                kr_size=kr.stat().st_size,
+                src_size=src.stat().st_size,
                 usa_dur=_ffprobe_duration(usa),
-                kr_dur=_ffprobe_duration(kr),
+                src_dur=_ffprobe_duration(src),
             ))
     return jobs
 
 
-def _video_bitrate_kbps(usa_size: int, kr_dur: float) -> int:
+def _video_bitrate_kbps(usa_size: int, src_dur: float) -> int:
     """Always returns the project-wide default. Slot fit is handled later by
     the ISO patcher (which relocates oversize files past the original ISO end)."""
     return DEFAULT_VIDEO_KBPS
@@ -113,14 +116,14 @@ def build_cutscene(job: CutsceneJob, work_dir: Path, ffmpeg: Path) -> Path:
     # 1) demux KR
     subprocess.run(
         [str(ffmpeg), "-y", "-hide_banner", "-loglevel", "error",
-         "-i", str(job.kr_sfd),
+         "-i", str(job.src_sfd),
          "-map", "0:v", "-c:v", "copy", str(m1v),
          "-map", "0:a", "-c:a", "copy", "-f", "adx", str(sfa)],
         check=True,
     )
 
     # 2) re-encode video — with subs if we have any, otherwise stream-copy.
-    bitrate_kbps = _video_bitrate_kbps(job.usa_size, job.kr_dur)
+    bitrate_kbps = _video_bitrate_kbps(job.usa_size, job.src_dur)
     if job.has_subs:
         subprocess.run(
             [str(ffmpeg), "-y", "-hide_banner", "-loglevel", "warning",
@@ -149,7 +152,9 @@ def build_cutscene(job: CutsceneJob, work_dir: Path, ffmpeg: Path) -> Path:
     return out
 
 
-def run_all(work_dir: Path = ROOT / "build" / "cutscenes",
+def run_all(work_dir: Path = ROOT / "build" / "cutscenes-kr",
+            src_root: Path = ROOT / "work" / "kr",
+            subs_dir: Path = ROOT / "subs" / "korean",
             verbose: bool = True) -> dict[str, Path]:
     """Run the pipeline for every cutscene that needs an undub.
 
@@ -160,7 +165,7 @@ def run_all(work_dir: Path = ROOT / "build" / "cutscenes",
     """
     ffmpeg = find_or_build_ffmpeg()
     out: dict[str, Path] = {}
-    jobs = discover_jobs()
+    jobs = discover_jobs(src_root=src_root, subs_dir=subs_dir)
     for job in jobs:
         wants_audio_swap = job.needs_undub
         wants_sub_burn = job.has_subs
@@ -175,8 +180,8 @@ def run_all(work_dir: Path = ROOT / "build" / "cutscenes",
             out["/" + job.rel] = target
             continue
         if verbose:
-            print(f"  [build] {job.rel}  USA={job.usa_size:,}  KR={job.kr_size:,}  "
-                  f"USA/KR dur={job.usa_dur:.1f}/{job.kr_dur:.1f}s  subs={'Y' if wants_sub_burn else 'n'}")
+            print(f"  [build] {job.rel}  USA={job.usa_size:,}  src={job.src_size:,}  "
+                  f"USA/src dur={job.usa_dur:.1f}/{job.src_dur:.1f}s  subs={'Y' if wants_sub_burn else 'n'}")
         try:
             built = build_cutscene(job, work_dir, ffmpeg)
         except Exception as e:
