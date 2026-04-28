@@ -53,6 +53,7 @@ from afs import Afs, write_afs
 # scheme) between regions, so the only difference is the strings.
 USA_TEXT_EXTS = (
     ".cht",  # phone conversations + NPC option dialog
+    ".pod",  # phone conversation popup tutorials (148 files, 12328 B fixed)
     ".tui",  # UI labels
     ".itm",  # item names + descriptions
     ".gft",  # gift dialog

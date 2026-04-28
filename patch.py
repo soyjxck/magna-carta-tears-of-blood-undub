@@ -40,6 +40,7 @@ sys.path.insert(0, str(ROOT / "lib"))
 from cutscenes import run_all as run_cutscenes
 from ffmpeg import find_or_build_ffmpeg
 from iso import patch_iso
+from linear import build as build_linear
 from ship import build as build_ship
 
 DEFAULT_USA_ISO = ROOT / "roms" / "Magna Carta - Tears of Blood (USA).iso"
@@ -64,6 +65,7 @@ def _paths(source: str) -> dict[str, Path]:
         "src_ship": src_root / "SHIP.AFS",
         "subs_dir": SUBS_DIRS[source],
         "cutscenes_dir": BUILD / f"cutscenes-{source}",
+        "linear_hybrid": BUILD / f"{source}_base" / "LINEAR.AFS",
         "ship_hybrid": BUILD / f"{source}_base" / "SHIP.AFS",
         "patched_iso": BUILD / f"magna-carta-tears-of-blood-undub-{source}.iso",
         "patch_xdelta": BUILD / f"magna-carta-tears-of-blood-undub-{source}.xdelta",
@@ -117,14 +119,18 @@ def cmd_build_iso(args: argparse.Namespace) -> int:
     else:
         print(f"  Phase 1: no cutscenes built — run `patch.py cutscenes --source {args.source}` first")
 
-    # Phase 3: build hybrid SHIP.AFS, then queue the AFS swaps
+    # Phase 3: build hybrid SHIP.AFS + hybrid LINEAR.AFS, then queue the AFS swaps
     print(f"  Phase 3: building {args.source}-base hybrid SHIP.AFS with USA text overlays")
     build_ship(out_path=p["ship_hybrid"], src_ship=p["src_ship"])
     if not p["ship_hybrid"].exists():
         sys.exit(f"hybrid SHIP.AFS missing at {p['ship_hybrid']}")
     if not p["src_linear"].exists() or not p["src_music"].exists():
         sys.exit(f"source LINEAR.AFS / MUSIC.AFS missing — run `patch.py setup --source {args.source}` first")
-    replacements["/LINEAR.AFS"] = p["src_linear"]
+    print(f"  Phase 3: building {args.source}-base hybrid LINEAR.AFS with USA texture/staticmesh overlays")
+    build_linear(out_path=p["linear_hybrid"], src_linear=p["src_linear"], source=args.source)
+    if not p["linear_hybrid"].exists():
+        sys.exit(f"hybrid LINEAR.AFS missing at {p['linear_hybrid']}")
+    replacements["/LINEAR.AFS"] = p["linear_hybrid"]
     replacements["/MUSIC.AFS"] = p["src_music"]
     replacements["/SHIP.AFS"] = p["ship_hybrid"]
 
