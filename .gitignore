@@ -14,3 +14,9 @@ __pycache__/
 .venv/
 venv/
 .claude/
+
+# Local-only archives — kept on disk for reference but never published.
+# The D-build trail and per-extension SHIP.AFS analyses lived here during
+# investigation; the canonical pipeline lives in lib/{afs,iso,ship,cutscenes,ffmpeg}.py.
+lib/experiments/
+docs/

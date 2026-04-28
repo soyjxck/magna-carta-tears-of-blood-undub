@@ -4,7 +4,7 @@ For one SFD basename (e.g. "181818"):
   1. Demux KR/<name>.SFD -> .m1v + .sfa via ffmpeg-libass
   2. Compute CBR video bitrate so the muxed result fits in USA's slot
   3. Re-encode .m1v with `ass=subs/<name>.ass` filter at that CBR
-  4. Mux re-encoded video + KR audio via lib/sofdec_mux.SofdecMuxer
+  4. Mux re-encoded video + KR audio via the sfd-muxer package (SofdecMuxer)
   5. Return the final .SFD path
 
 Skips a cutscene when:
@@ -23,8 +23,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
-from sofdec_mux import SofdecMuxer
-from ffmpeg_libass import find_or_build_ffmpeg
+from sfd_muxer import SofdecMuxer
+from ffmpeg import find_or_build_ffmpeg
 
 
 ADX_AUDIO_BPS = 432_000

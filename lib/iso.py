@@ -58,7 +58,9 @@ def _read_iso_lbas(iso: Path) -> dict[str, tuple[int, int]]:
             lba = int(line[l_open + 1: l_close].split()[0])
         except (IndexError, ValueError):
             continue
-        name = line[l_close + 1:].strip().rstrip(";1")
+        name = line[l_close + 1:].strip()
+        if name.endswith(";1"):
+            name = name[:-2]
         full = cur_dir.rstrip("/") + "/" + name
         table[full] = (lba, size)
     return table
