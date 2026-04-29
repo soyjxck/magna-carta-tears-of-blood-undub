@@ -45,6 +45,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
 from afs import Afs, write_afs
+from translate import SLOT_FORMATS, translated_fpb_bytes, translated_slot_bytes
 
 
 # Extensions that hold English text in USA / Korean text in KR.
@@ -56,6 +57,7 @@ USA_TEXT_EXTS = (
     ".pod",  # phone conversation popup tutorials (148 files, 12328 B fixed)
     ".tui",  # UI labels
     ".itm",  # item names + descriptions
+    ".odd",  # side quests + chest reward names (e.g. "Riot Sword", "Vorpal Bunny")
     ".gft",  # gift dialog
     ".cha",  # character data (names, bios)
     ".abi",  # ability definitions
@@ -111,9 +113,14 @@ def build_manifest(entries: list[tuple[str, bytes]]) -> bytes:
 def build(out_path: Path | None = None,
           usa_ship: Path = ROOT / "work" / "usa" / "SHIP.AFS",
           src_ship: Path = ROOT / "work" / "kr" / "SHIP.AFS",
+          translations_dir: Path | None = None,
           verbose: bool = True) -> Path:
     """Build a hybrid SHIP.AFS using `src_ship` (KR or JP) as the structural
-    base, with USA bytes overlaid for text-bearing extensions and `.fpb`."""
+    base, with USA bytes overlaid for text-bearing extensions and `.fpb`.
+
+    `translations_dir`: when set, `.fpb` files with a matching catalog at
+    `<dir>/fpb/<basename>.json` are rebuilt from that catalog (translation
+    flow). When None, raw USA bytes are used (default — vanilla undub)."""
     if out_path is None:
         # Default: build/<region>_base/SHIP.AFS  (e.g. work/jp/... -> build/jp_base/...)
         region_tag = Path(src_ship).parent.name + "_base"
@@ -127,6 +134,8 @@ def build(out_path: Path | None = None,
     entries: list[tuple[str, bytes]] = []
     swapped_text = 0
     swapped_fpb = 0
+    translated_fpb = 0
+    translated_slot = 0
     kept_src = 0
 
     with src_ship.open("rb") as fh_src, usa_ship.open("rb") as fh_usa:
@@ -135,11 +144,33 @@ def build(out_path: Path | None = None,
             ext = "." + lname.rsplit(".", 1)[-1] if "." in lname else ""
 
             if SWAP_FPB and ext == ".fpb" and lname in usa_idx:
-                blob = usa.read_entry(usa_idx[lname], fh_usa)
-                swapped_fpb += 1
+                usa_blob = usa.read_entry(usa_idx[lname], fh_usa)
+                # Translation catalog hook is OPT-IN: caller passes
+                # translations_dir to enable. Default builds use raw USA.
+                tx_blob = (translated_fpb_bytes(name, usa_blob,
+                                                catalog_dir=translations_dir / "fpb")
+                           if translations_dir is not None else None)
+                if tx_blob is not None:
+                    blob = tx_blob
+                    translated_fpb += 1
+                else:
+                    blob = usa_blob
+                    swapped_fpb += 1
             elif ext in USA_TEXT_EXTS and lname in usa_idx:
-                blob = usa.read_entry(usa_idx[lname], fh_usa)
-                swapped_text += 1
+                usa_blob = usa.read_entry(usa_idx[lname], fh_usa)
+                # Slot-format catalog hook (.cht / .odd / .gft / .cha / .cdg /
+                # .mdg / .ecd / .fds). Same opt-in semantics as .fpb above.
+                tx_blob = None
+                if translations_dir is not None and ext in SLOT_FORMATS:
+                    tx_blob = translated_slot_bytes(
+                        ext, name, usa_blob,
+                        catalog_dir=translations_dir / ext.lstrip("."))
+                if tx_blob is not None:
+                    blob = tx_blob
+                    translated_slot += 1
+                else:
+                    blob = usa_blob
+                    swapped_text += 1
             else:
                 blob = src.read_entry(i, fh_src)
                 kept_src += 1
@@ -166,6 +197,10 @@ def build(out_path: Path | None = None,
         print(f"  total entries: {len(entries)}")
         print(f"  USA text overlays ({len(USA_TEXT_EXTS)} exts): {swapped_text}")
         print(f"  .fpb blanket-swapped to USA: {swapped_fpb}")
+        if translated_fpb:
+            print(f"  .fpb built from translation catalog: {translated_fpb}")
+        if translated_slot:
+            print(f"  slot-format files built from translation catalog: {translated_slot}")
         print(f"  kept source-region: {kept_src}")
 
     write_afs(out_path, entries, toc_metadata=src_meta)

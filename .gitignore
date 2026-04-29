@@ -20,3 +20,7 @@ venv/
 # investigation; the canonical pipeline lives in lib/{afs,iso,ship,cutscenes,ffmpeg}.py.
 lib/experiments/
 docs/
+
+# Translation catalogs are derived from a user's own ISOs by
+# `patch.py translate-extract`.
+translations/

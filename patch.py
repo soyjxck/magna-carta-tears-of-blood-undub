@@ -42,6 +42,7 @@ from ffmpeg import find_or_build_ffmpeg
 from iso import patch_iso
 from linear import build as build_linear
 from ship import build as build_ship
+from translate import extract_all, CATALOG_DIR
 
 DEFAULT_USA_ISO = ROOT / "roms" / "Magna Carta - Tears of Blood (USA).iso"
 DEFAULT_SOURCE_ISOS = {
@@ -120,8 +121,16 @@ def cmd_build_iso(args: argparse.Namespace) -> int:
         print(f"  Phase 1: no cutscenes built — run `patch.py cutscenes --source {args.source}` first")
 
     # Phase 3: build hybrid SHIP.AFS + hybrid LINEAR.AFS, then queue the AFS swaps
-    print(f"  Phase 3: building {args.source}-base hybrid SHIP.AFS with USA text overlays")
-    build_ship(out_path=p["ship_hybrid"], src_ship=p["src_ship"])
+    tx_dir = ROOT / "translations" if getattr(args, "translations", False) else None
+    if tx_dir is not None:
+        if not tx_dir.exists():
+            sys.exit(f"--translations passed but {tx_dir} doesn't exist — "
+                     f"run `patch.py translate-extract` first")
+        print(f"  Phase 3: building {args.source}-base hybrid SHIP.AFS with USA text overlays + translations from {tx_dir}")
+    else:
+        print(f"  Phase 3: building {args.source}-base hybrid SHIP.AFS with USA text overlays")
+    build_ship(out_path=p["ship_hybrid"], src_ship=p["src_ship"],
+               translations_dir=tx_dir)
     if not p["ship_hybrid"].exists():
         sys.exit(f"hybrid SHIP.AFS missing at {p['ship_hybrid']}")
     if not p["src_linear"].exists() or not p["src_music"].exists():
@@ -155,6 +164,25 @@ def cmd_xdelta(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_translate_extract(args: argparse.Namespace) -> int:
+    """Extract per-file translation catalogs from USA SHIP, with KR/JP refs."""
+    usa = WORK / "usa" / "SHIP.AFS"
+    kr  = WORK / "kr"  / "SHIP.AFS"
+    jp  = WORK / "jp"  / "SHIP.AFS"
+    if not usa.exists():
+        sys.exit("USA SHIP.AFS missing — run `patch.py setup` first")
+    counts = extract_all(usa,
+                         kr if kr.exists() else None,
+                         jp if jp.exists() else None,
+                         CATALOG_DIR)
+    total = sum(counts.values())
+    for ext, n in counts.items():
+        print(f"  {ext}: {n} files -> translations/{ext.lstrip('.')}/")
+    print(f"\n  {total} catalog files total.")
+    print(f"  edit *.json `en` fields, then `patch.py build-iso --translations`.")
+    return 0
+
+
 def cmd_full(args: argparse.Namespace) -> int:
     cmd_setup(args)
     cmd_cutscenes(args)
@@ -172,9 +200,18 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("setup", help="extract ISOs + build ffmpeg-libass").set_defaults(func=cmd_setup)
     sub.add_parser("cutscenes", help="build all undubbed SFDs from subs/<source>/").set_defaults(func=cmd_cutscenes)
-    sub.add_parser("build-iso", help="patch USA ISO with cutscenes + AFS swaps").set_defaults(func=cmd_build_iso)
+    bi = sub.add_parser("build-iso", help="patch USA ISO with cutscenes + AFS swaps")
+    bi.add_argument("--translations", action="store_true",
+                    help="apply edits from translations/fpb/*.json (opt-in)")
+    bi.set_defaults(func=cmd_build_iso)
     sub.add_parser("xdelta", help="USA ISO -> patched ISO -> xdelta3").set_defaults(func=cmd_xdelta)
-    sub.add_parser("full", help="setup + cutscenes + build-iso + xdelta").set_defaults(func=cmd_full)
+    f = sub.add_parser("full", help="setup + cutscenes + build-iso + xdelta")
+    f.add_argument("--translations", action="store_true",
+                   help="apply edits from translations/fpb/*.json (opt-in)")
+    f.set_defaults(func=cmd_full)
+    sub.add_parser("translate-extract",
+                   help="dump per-file .fpb catalogs to translations/fpb/ for editing"
+                   ).set_defaults(func=cmd_translate_extract)
 
     args = ap.parse_args()
     return args.func(args)
