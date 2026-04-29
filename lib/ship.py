@@ -45,7 +45,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
 from afs import Afs, write_afs
-from translate import SLOT_FORMATS, translated_fpb_bytes, translated_slot_bytes
+from translate import (SLOT_FORMATS, REGION_OVERLAY_EXTS,
+                       translated_fpb_bytes, translated_slot_bytes,
+                       translated_region_bytes)
 
 
 # Extensions that hold English text in USA / Korean text in KR.
@@ -136,6 +138,7 @@ def build(out_path: Path | None = None,
     swapped_fpb = 0
     translated_fpb = 0
     translated_slot = 0
+    translated_region = 0
     kept_src = 0
 
     with src_ship.open("rb") as fh_src, usa_ship.open("rb") as fh_usa:
@@ -158,16 +161,28 @@ def build(out_path: Path | None = None,
                     swapped_fpb += 1
             elif ext in USA_TEXT_EXTS and lname in usa_idx:
                 usa_blob = usa.read_entry(usa_idx[lname], fh_usa)
-                # Slot-format catalog hook (.cht / .odd / .gft / .cha / .cdg /
-                # .mdg / .ecd / .fds). Same opt-in semantics as .fpb above.
+                # Translation catalog hooks (opt-in via translations_dir):
+                #  - SLOT_FORMATS: per-slot fixed-stride formats
+                #  - REGION_OVERLAY_EXTS: ASCII regions in binary
                 tx_blob = None
-                if translations_dir is not None and ext in SLOT_FORMATS:
-                    tx_blob = translated_slot_bytes(
-                        ext, name, usa_blob,
-                        catalog_dir=translations_dir / ext.lstrip("."))
+                tx_kind = None
+                if translations_dir is not None:
+                    if ext in SLOT_FORMATS:
+                        tx_blob = translated_slot_bytes(
+                            ext, name, usa_blob,
+                            catalog_dir=translations_dir / ext.lstrip("."))
+                        tx_kind = "slot"
+                    elif ext in REGION_OVERLAY_EXTS:
+                        tx_blob = translated_region_bytes(
+                            ext, name, usa_blob,
+                            catalog_dir=translations_dir / ext.lstrip("."))
+                        tx_kind = "region"
                 if tx_blob is not None:
                     blob = tx_blob
-                    translated_slot += 1
+                    if tx_kind == "slot":
+                        translated_slot += 1
+                    else:
+                        translated_region += 1
                 else:
                     blob = usa_blob
                     swapped_text += 1
@@ -201,6 +216,8 @@ def build(out_path: Path | None = None,
             print(f"  .fpb built from translation catalog: {translated_fpb}")
         if translated_slot:
             print(f"  slot-format files built from translation catalog: {translated_slot}")
+        if translated_region:
+            print(f"  region-overlay files built from translation catalog: {translated_region}")
         print(f"  kept source-region: {kept_src}")
 
     write_afs(out_path, entries, toc_metadata=src_meta)

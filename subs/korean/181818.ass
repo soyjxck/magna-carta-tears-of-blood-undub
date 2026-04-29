@@ -12,10 +12,4 @@ Style: Default,Arial,28,&H00FFFFFF,&H00000000,&HC0000000,1,0,3,2,2,30,30,18,1
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
-Dialogue: 0,0:00:00.00,0:00:28.00,Default,,0,0,0,,Here we are, so far from where we started, from another time, so long ago.
-Dialogue: 0,0:00:28.00,0:00:47.00,Default,,0,0,0,,Will we ever know why things turn that night? Why things burn that night? Hearts alone by the sun.
-Dialogue: 0,0:00:47.00,0:01:08.00,Default,,0,0,0,,Tears of blood, wherever we must stay. Tears of blood, to live and love another day. Tears of blood, no matter what they say.
-Dialogue: 0,0:01:08.00,0:01:22.00,Default,,0,0,0,,When you're all alone, there are holes to our beauty. When you're all alone, there are hearts and our souls.
-Dialogue: 0,0:01:22.00,0:01:49.00,Default,,0,0,0,,When you're all alone, there are hearts and our souls. Tears of blood, wherever we must stay. Tears of blood, to live and love another day.
-Dialogue: 0,0:01:49.00,0:02:18.00,Default,,0,0,0,,Tears of blood, no matter what they say. When you're all alone, there are hearts and our souls. It was war.
-Dialogue: 0,0:02:19.00,0:02:25.00,Default,,0,0,0,,Thanks for watching!
+Dialogue: 0,0:00:00.00,0:00:28.00,Default,,0,0,0,

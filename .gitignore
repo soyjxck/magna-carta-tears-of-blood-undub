@@ -24,3 +24,7 @@ docs/
 # Translation catalogs are derived from a user's own ISOs by
 # `patch.py translate-extract`.
 translations/
+
+# Local-only — incomplete notes / one-off rebuild backups.
+translations-analysis/
+build_old/

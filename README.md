@@ -15,7 +15,10 @@ Each patch (KR or JP) gives:
 | Battle voices, NPC barks | Source-region |
 | World NPC dialog (`.fpb`) | English text on source-region voice |
 | Phone conversations + option dialogs (`.cht`) | English |
+| Talisman tutorial popups (`.pod`) | English |
+| Side-quest text + chest reward names (`.odd`) | English |
 | UI labels, item names, abilities, monster bestiary, talisman descriptions | English |
+| Menu tabs / title screen / HUD textures | English (LINEAR.AFS texture overlay) |
 | Engine messages, menus | English (USA boot ELF + USA fonts kept) |
 | Music + SFX | Unchanged |
 
@@ -75,34 +78,66 @@ python3 patch.py --source kr xdelta      # build/magna-carta-tears-of-blood-undu
 
 The `subs/korean/` and `subs/japanese/` directories ship with the English `.ass` subtitle files used for cutscene burn-in. They're committed to the repo; rebuilding from scratch doesn't re-run any transcription.
 
+### Option 3 — Re-translate with custom English
+
+Per-file JSON catalogs let you replace the official ATLUS USA English with your own translation. Edits land in the next `build-iso --translations` rebuild.
+
+```bash
+python3 patch.py translate-extract               # bootstrap catalogs from your ISOs
+# ...edit translations/<ext>/<basename>.json's `en` fields...
+python3 patch.py --source kr build-iso --translations
+```
+
+Catalogs cover every text-bearing file in SHIP.AFS — 995 files across `.fpb` (dialog), `.cht` (phone conversations), `.pod` (Talisman tutorials), `.tui` (UI labels), `.itm` (item names + descriptions), `.cha` (character bios), `.abi` (abilities), `.sgi` (combat styles), `.cdg`/`.mdg` (talisman effects + monster bestiary), and 10 others. Each catalog includes the USA English plus KR/JP reference text so you can see how the original phrased it. The `translations/` directory is gitignored — catalogs are derived from the user's own ISO and stay local.
+
+Cutscene subtitles work directly: edit the `.ass` files in `subs/{korean,japanese}/` and re-run `cutscenes`.
+
+### Bonus — dump cutscenes as MKV
+
+Useful for previewing the source-region cutscenes outside the game (with or without burned-in English subs).
+
+```bash
+python3 patch.py dump-mkv --regions kr,jp                # raw remuxes
+python3 patch.py dump-mkv --regions kr --hardsub          # KR video + EN subs burned in
+python3 patch.py dump-mkv --regions jp --hardsub          # JP video + EN subs burned in
+```
+
+Output lands at `build/cutscene-dumps/<region>[-hardsub]/`.
+
 ## How It Works (TL;DR)
 
-The game is built on Unreal Engine 2 with CRI's AFS archive format and SofDec MPEG-PS cutscenes. Korean voice IDs and USA voice IDs occupy completely disjoint ID ranges (no 1:1 ID mapping), and the engine's `MrtsGame.u` bytecode is tightly coupled to whichever region's data files it ships with. So a USA-base voice swap doesn't work — we instead use **KR LINEAR.AFS + KR MUSIC.AFS + KR's scene scripts in SHIP.AFS** (so KR scripts call KR voice IDs that exist in KR audio), then **overlay USA bytes for text-bearing files** in SHIP (`.cht`, `.fpb`, `.tui`, `.itm`, etc.) so visible text stays English.
+The game is built on Unreal Engine 2 with CRI's AFS archive format and SofDec MPEG-PS cutscenes. Korean voice IDs and USA voice IDs occupy completely disjoint ID ranges (no 1:1 ID mapping), and the engine's `MrtsGame.u` bytecode is tightly coupled to whichever region's data files it ships with. So a USA-base voice swap doesn't work — we instead use **source-region LINEAR.AFS + MUSIC.AFS + scene scripts in SHIP.AFS** (so source scripts call source voice IDs that exist in source audio), then **overlay USA bytes** for the text-bearing files in SHIP (`.cht`, `.fpb`, `.tui`, `.itm`, `.odd`, `.pod`, etc.) and the UI texture packs in LINEAR (`.lin` files holding `Texture` and `StaticMesh` UE2 packages, plus the title-screen Map at `00000624.lin`).
 
-The keystone discovery: SHIP.AFS slot 0 is a plaintext `(filename, decimal-size)` manifest the engine reads at boot to populate its file-size cache. When we swap USA bytes in but leave the manifest pointing at KR sizes, the engine reads short and the parser overruns its buffer. Rebuilding the manifest with the hybrid's actual sizes is the fix that unlocks full English coverage on the world dialog (`.fpb`).
+The keystone discovery: SHIP.AFS slot 0 is a plaintext `(filename, decimal-size)` manifest the engine reads at boot to populate its file-size cache. When we swap USA bytes in but leave the manifest pointing at source-region sizes, the engine reads short and the parser overruns its buffer. Rebuilding the manifest with the hybrid's actual sizes is the fix that unlocks full English coverage on the world dialog (`.fpb`) and every other text format. The same trick applies to LINEAR.AFS for the texture overlay.
 
-Cutscenes use [`sfd-muxer`](https://github.com/soyjxck/sfd-muxer) — we demux KR SFDs, re-encode video at 5500 kbps CBR with English subtitles (pre-shipped in `subs/`) burned in via libass, then mux back to a fresh SFD.
+Cutscenes use [`sfd-muxer`](https://github.com/soyjxck/sfd-muxer) — we demux source SFDs, re-encode video at 5500 kbps CBR with English subtitles (pre-shipped in `subs/`) burned in via libass, then mux back to a fresh SFD.
 
 Full reverse-engineering record in [TECHNICAL.md](TECHNICAL.md).
 
 ## Repo Layout
 
 ```
-patch.py                  # CLI — setup / transcribe / cutscenes / build-iso / xdelta / full
+patch.py                  # CLI — setup / cutscenes / build-iso / xdelta / full
+                          #       translate-extract / dump-mkv
 lib/
   afs.py                  # CRI AFS reader + writer
   iso.py                  # ISO9660 patcher (in-place + relocation)
-  ship.py                 # canonical hybrid SHIP.AFS builder (D37 architecture)
-  cutscenes.py            # demux + re-encode + mux pipeline for SFDs
+  ship.py                 # canonical hybrid SHIP.AFS builder
+  linear.py               # canonical hybrid LINEAR.AFS builder
+  cutscenes.py            # demux + re-encode + mux pipeline for SFDs + MKV dump
   ffmpeg.py               # ffmpeg+libass auto-build
-  experiments/            # archived diagnostic builds (D24..D37 trail)
-docs/ship_afs/            # per-extension SHIP.AFS format reports
+  translate/              # retranslation pipeline (per-format parsers)
+    fpb.py                #   .fpb windowed-pool dialog
+    slot.py               #   fixed-stride slot files (.cht, .odd, .gft, ...)
+    region.py             #   region-overlay files (.pod, .tui, .itm, ...)
+    catalog.py            #   extract_all orchestrator
 roms/                     # place both ISOs here (gitignored)
 work/                     # extracted ISO trees (gitignored)
-build/                    # output ISO + xdelta (gitignored)
+build/                    # output ISO + xdelta + cutscenes + MKV dumps (gitignored)
 subs/
   korean/                 # 46 .ass files used when --source kr
   japanese/               # 46 .ass files used when --source jp
+translations/             # per-file translation catalogs (gitignored)
 ```
 
 ## Credit

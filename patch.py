@@ -2,24 +2,40 @@
 
 Subcommands
 -----------
-  setup        Extract USA + source-region ISOs and build ffmpeg with libass.
+  setup              Extract USA + source-region ISOs and build ffmpeg with libass.
 
-  cutscenes    Build undubbed SFDs (source-region video + audio + English
-               ASS burned in) for every cutscene. Reads pre-generated subs
-               from `subs/<source>/`. Outputs land under build/cutscenes-<source>/.
+  cutscenes          Build undubbed SFDs (source-region video + audio + English
+                     ASS burned in) for every cutscene. Reads pre-generated subs
+                     from `subs/<source>/`. Outputs land under
+                     build/cutscenes-<source>/.
 
-  build-iso    Build the full undub ISO:
-                 Phase 1 (cutscenes): patch in re-encoded SFDs.
-                 Phase 3 (in-game): swap source LINEAR.AFS + MUSIC.AFS for
-                 the chosen voice/level data, and a source-base hybrid
-                 SHIP.AFS with USA text overlays for English UI/dialog/items.
-                 USA boot ELF + USA FILE.AFS stay (USA engine + fonts).
-               Output: build/magna-carta-tears-of-blood-undub-<source>.iso
+  build-iso          Build the full undub ISO:
+                       Phase 1 (cutscenes): patch in re-encoded SFDs.
+                       Phase 3 (in-game): swap source LINEAR.AFS + MUSIC.AFS for
+                       the chosen voice/level data, plus source-base hybrid
+                       SHIP.AFS + LINEAR.AFS with USA overlays for English
+                       UI/dialog/items + menu textures.
+                       USA boot ELF + USA FILE.AFS stay (USA engine + fonts).
+                     Output: build/magna-carta-tears-of-blood-undub-<source>.iso
 
-  xdelta       xdelta3 -e -9 -S djw  USA ISO -> patched ISO ->
-               build/magna-carta-tears-of-blood-undub-<source>.xdelta
+                     With --translations: applies edits from translations/<ext>/
+                     catalogs (see translate-extract). Default builds use raw
+                     USA bytes — vanilla undub.
 
-  full         setup + cutscenes + build-iso + xdelta.
+  xdelta             xdelta3 -e -9 -S djw  USA ISO -> patched ISO ->
+                     build/magna-carta-tears-of-blood-undub-<source>.xdelta
+
+  full               setup + cutscenes + build-iso + xdelta.
+
+  translate-extract  Dump per-file translation catalogs to translations/<ext>/.
+                     Each catalog stores USA English + KR/JP reference text
+                     for one SHIP.AFS file family (.fpb dialog, .cht phone
+                     conversations, .tui UI labels, etc.). Edit the `en`
+                     fields, then re-run `build-iso --translations`.
+
+  dump-mkv           Dump KR or JP cutscenes to MKV files for review,
+                     optionally with English subs hardsubbed via libass.
+                     Output: build/cutscene-dumps/<region>[-hardsub]/.
 
 Source region (--source kr | jp; default kr) selects which region's voice +
 scene data is used for the undub. Inputs:
@@ -37,7 +53,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "lib"))
 
-from cutscenes import run_all as run_cutscenes
+from cutscenes import dump_all_to_mkv, run_all as run_cutscenes
 from ffmpeg import find_or_build_ffmpeg
 from iso import patch_iso
 from linear import build as build_linear
@@ -164,6 +180,13 @@ def cmd_xdelta(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dump_mkv(args: argparse.Namespace) -> int:
+    """Dump KR / JP cutscenes as MKV files. Optionally burn English
+    subs into the video via libass (hardsub)."""
+    regions = tuple(r.strip() for r in args.regions.split(",") if r.strip())
+    return dump_all_to_mkv(regions=regions, hardsub=args.hardsub, jobs=args.jobs)
+
+
 def cmd_translate_extract(args: argparse.Namespace) -> int:
     """Extract per-file translation catalogs from USA SHIP, with KR/JP refs."""
     usa = WORK / "usa" / "SHIP.AFS"
@@ -210,8 +233,17 @@ def main() -> int:
                    help="apply edits from translations/fpb/*.json (opt-in)")
     f.set_defaults(func=cmd_full)
     sub.add_parser("translate-extract",
-                   help="dump per-file .fpb catalogs to translations/fpb/ for editing"
+                   help="dump per-file translation catalogs to translations/<ext>/ for editing"
                    ).set_defaults(func=cmd_translate_extract)
+    dm = sub.add_parser("dump-mkv",
+                        help="dump KR/JP cutscenes as MKV (optional --hardsub)")
+    dm.add_argument("--regions", default="kr,jp",
+                    help="comma-separated subset of {kr,jp} (default: kr,jp)")
+    dm.add_argument("--hardsub", action="store_true",
+                    help="burn English subs from subs/{korean,japanese}/ into the video")
+    dm.add_argument("--jobs", type=int, default=4,
+                    help="parallel ffmpeg processes (default: 4)")
+    dm.set_defaults(func=cmd_dump_mkv)
 
     args = ap.parse_args()
     return args.func(args)
