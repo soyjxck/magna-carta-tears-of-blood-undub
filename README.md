@@ -1,4 +1,11 @@
-# Magna Carta: Tears of Blood — Undub Patch
+# Magna Carta: Tears of Blood — Undub Patch (Alpha)
+
+> ⚠️ **Pre-alpha.** Both regional patches boot and play through the early
+> game in PCSX2 testing, but the patch hasn't been clear-flagged on a full
+> playthrough yet. **The retranslation pipeline (Option 3 below) is
+> especially alpha** — the catalog format and rebuild semantics may change
+> as edge cases surface. File issues for any boot crashes, scene hangs, or
+> rendering glitches you hit.
 
 Restores the original Korean **or** Japanese voice acting in the USA PS2 release of *Magna Carta: Tears of Blood* (SLUS-21221). Two separate xdelta patches — pick whichever VO you prefer. Cutscenes are re-encoded with the source region's audio + English subtitles burned into the video; in-game dialog runs from the source region's audio archive while the UI / item / dialog text stays English.
 
@@ -78,7 +85,9 @@ python3 patch.py --source kr xdelta      # build/magna-carta-tears-of-blood-undu
 
 The `subs/korean/` and `subs/japanese/` directories ship with the English `.ass` subtitle files used for cutscene burn-in. They're committed to the repo; rebuilding from scratch doesn't re-run any transcription.
 
-### Option 3 — Re-translate with custom English
+### Option 3 — Re-translate with custom English  *(alpha)*
+
+> ⚠️ **Experimental.** This pipeline lets you replace ATLUS USA's English with your own translation, but the catalog format and rebuild semantics aren't frozen yet. Round-trip is byte-identical for unedited catalogs (verified on 995 files), and edits work end-to-end on the formats covered, but format-specific edge cases will keep surfacing as people use it. Don't expect catalog files written today to be readable by future builds without migration. Test in-game before committing time to bulk re-translation work.
 
 Per-file JSON catalogs let you replace the official ATLUS USA English with your own translation. Edits land in the next `build-iso --translations` rebuild.
 

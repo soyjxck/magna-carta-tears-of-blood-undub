@@ -638,13 +638,38 @@ SFDs were classified into four tiers vs their source-region counterparts:
 | 3 | Same duration, different packetization | 1 | Needs custom SofDec muxer |
 | 4 | Different cutscene durations | 25 | Cuts diverge between regions; cannot losslessly undub |
 
-For Tier-3/4 cutscenes we use the [`sfd-muxer`](https://github.com/soyjxck/sfd-muxer) package (Python port of nebulas-star/SFD_Muxer, byte-identical to the C reference) and a re-encode pipeline (`lib/cutscenes.py`):
+For Tier-3/4 cutscenes we use the [`sfd-muxer`](https://pypi.org/project/sfd-muxer/) package (`pip install sfd-muxer`, Python port of nebulas-star/SFD_Muxer) and a re-encode pipeline (`lib/cutscenes.py`):
 
 1. Demux source SFD → MPEG-1 video + ADX audio.
 2. Re-encode video at CBR 5500 kbps with English subtitles (pre-generated, shipped in `subs/<source>/`) burned in via libass.
 3. Mux back as a fresh SFD using our muxer.
 
 39/46 SFDs successfully re-encoded with source audio + burned English subs. The result: cutscenes show the original source-region character animations + source voice + English subtitles overlaid by us.
+
+### Round-trip notes for `sfd-muxer`
+
+Demuxing an existing SFD and re-muxing it produces **byte-identical
+elementary streams** (the video + audio bytes match the input exactly),
+but the resulting container can differ from the original in two ways
+that don't affect playback:
+
+- **Per-file CRI metadata sector is not preserved.** Original SFDs
+  encoded by CRI's reference tooling include a `CRITAGS` private-stream
+  PES (sector 3) carrying per-file IDs / version strings / timestamps.
+  This sector is editor metadata; the engine ignores it at playback.
+  Since the muxer's main use case is taking freshly re-encoded video +
+  audio bytes (where there's no original CRITAGS to copy from), it
+  doesn't emit a CRITAGS sector. Output is one sector (2048 B) shorter
+  than the original would have been.
+
+- **SCR scheduling may drift by ±1 LSB per sector.** The exact System
+  Clock Reference value at each pack_head depends on integer-division
+  order in the `block_num × sector × 90001 / (mux_rate × 50)` formula;
+  small ordering differences vs the C reference don't affect timing or
+  sync.
+
+Both differences are inert — the engine reads streams by start codes
+and uses each PES's own PTS/DTS for sync, not the pack-head SCR.
 
 ---
 
@@ -863,10 +888,10 @@ Apply with: `xdelta3 -d -s 'Magna Carta - Tears of Blood (USA).iso' magna-carta-
 | `lib/iso.py` | Patches the source USA ISO in place: writes new bytes at original LBAs when they fit, relocates past original ISO end + updates ISO9660 directory entries + grows PVD when they don't. |
 | `lib/ship.py` | **Canonical** hybrid SHIP.AFS builder (D37/D39 architecture). Per-extension USA overlay + slot-0 manifest rebuild. |
 | `lib/linear.py` | **Canonical** hybrid LINEAR.AFS builder (D38/D40 architecture). Per-class + per-name USA overlay + slot-0 manifest rebuild. |
-| `lib/cutscenes.py` | Phase-1 cutscene re-encode pipeline (demux → re-encode video with libass → mux). |
+| `lib/cutscenes.py` | Cutscene pipeline: demux → optional libass hardsub → mux. Drives both the SFD path (Phase-1 of `build-iso`) and the MKV path (`dump-mkv`). |
 | `lib/ffmpeg.py` | Auto-builds ffmpeg with libass if not present. |
 | `lib/experiments/` | Diagnostic scripts (gitignored). `analyze_lin.py` decompresses `.lin` files and dumps UE2 package structure. |
-| `sfd-muxer` (external) | Pure-Python SofDec MPEG-PS muxer/demuxer (byte-identical to reference C). [Own repo](https://github.com/soyjxck/sfd-muxer). |
+| `sfd-muxer` (PyPI) | Pure-Python SofDec MPEG-PS muxer/demuxer. Elementary streams round-trip byte-identically; container has minor differences vs original SFDs (see [Round-trip notes](#round-trip-notes-for-sfd-muxer)). [PyPI](https://pypi.org/project/sfd-muxer/) · [Repo](https://github.com/soyjxck/sfd-muxer). |
 | `subs/korean/*.ass`, `subs/japanese/*.ass` | Pre-generated English subtitle files for cutscene burn-in (46 each). |
 
 ---
