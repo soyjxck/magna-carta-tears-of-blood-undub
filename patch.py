@@ -71,9 +71,15 @@ WORK = ROOT / "work"
 BUILD = ROOT / "build"
 
 
-def _paths(source: str) -> dict[str, Path]:
-    """Resolve every per-region path from a single `source` flag."""
+def _paths(source: str, hardsub: bool = True) -> dict[str, Path]:
+    """Resolve every per-region path from a single `source` flag.
+
+    When ``hardsub=False`` the cutscene cache and patched ISO/xdelta
+    outputs use a ``-raw`` suffix so the two variants can coexist on
+    disk without colliding.
+    """
     src_root = WORK / source
+    suffix = "" if hardsub else "-raw"
     return {
         "src_root": src_root,
         "src_iso": DEFAULT_SOURCE_ISOS[source],
@@ -81,11 +87,11 @@ def _paths(source: str) -> dict[str, Path]:
         "src_music": src_root / "MUSIC.AFS",
         "src_ship": src_root / "SHIP.AFS",
         "subs_dir": SUBS_DIRS[source],
-        "cutscenes_dir": BUILD / f"cutscenes-{source}",
+        "cutscenes_dir": BUILD / f"cutscenes-{source}{suffix}",
         "linear_hybrid": BUILD / f"{source}_base" / "LINEAR.AFS",
         "ship_hybrid": BUILD / f"{source}_base" / "SHIP.AFS",
-        "patched_iso": BUILD / f"magna-carta-tears-of-blood-undub-{source}.iso",
-        "patch_xdelta": BUILD / f"magna-carta-tears-of-blood-undub-{source}.xdelta",
+        "patched_iso": BUILD / f"magna-carta-tears-of-blood-undub-{source}{suffix}.iso",
+        "patch_xdelta": BUILD / f"magna-carta-tears-of-blood-undub-{source}{suffix}.xdelta",
     }
 
 
@@ -108,14 +114,18 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
 
 def cmd_cutscenes(args: argparse.Namespace) -> int:
-    p = _paths(args.source)
-    out = run_cutscenes(work_dir=p["cutscenes_dir"], src_root=p["src_root"], subs_dir=p["subs_dir"])
-    print(f"\nbuilt {len(out)} cutscenes for source={args.source}")
+    hardsub = not getattr(args, "no_hardsub", False)
+    p = _paths(args.source, hardsub=hardsub)
+    out = run_cutscenes(work_dir=p["cutscenes_dir"], src_root=p["src_root"],
+                        subs_dir=p["subs_dir"], hardsub=hardsub)
+    tag = "" if hardsub else " (raw, no hardsub)"
+    print(f"\nbuilt {len(out)} cutscenes for source={args.source}{tag}")
     return 0
 
 
 def cmd_build_iso(args: argparse.Namespace) -> int:
-    p = _paths(args.source)
+    hardsub = not getattr(args, "no_hardsub", False)
+    p = _paths(args.source, hardsub=hardsub)
     replacements: dict[str, Path] = {}
 
     # Phase 1: cutscenes (re-encoded source video + audio with EN subs burned in)
@@ -167,9 +177,11 @@ def cmd_build_iso(args: argparse.Namespace) -> int:
 
 
 def cmd_xdelta(args: argparse.Namespace) -> int:
-    p = _paths(args.source)
+    hardsub = not getattr(args, "no_hardsub", False)
+    p = _paths(args.source, hardsub=hardsub)
     if not p["patched_iso"].exists():
-        sys.exit(f"run `patch.py build-iso --source {args.source}` first")
+        sys.exit(f"run `patch.py build-iso --source {args.source}"
+                 f"{' --no-hardsub' if not hardsub else ''}` first")
     subprocess.run(
         ["xdelta3", "-e", "-9", "-S", "djw", "-f",
          "-s", str(args.usa_iso), str(p["patched_iso"]), str(p["patch_xdelta"])],
@@ -222,15 +234,29 @@ def main() -> int:
 
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("setup", help="extract ISOs + build ffmpeg-libass").set_defaults(func=cmd_setup)
-    sub.add_parser("cutscenes", help="build all undubbed SFDs from subs/<source>/").set_defaults(func=cmd_cutscenes)
+
+    cs = sub.add_parser("cutscenes", help="build all undubbed SFDs from subs/<source>/")
+    cs.add_argument("--no-hardsub", action="store_true",
+                    help="skip burning EN subs into video; output raw source-region cutscenes")
+    cs.set_defaults(func=cmd_cutscenes)
+
     bi = sub.add_parser("build-iso", help="patch USA ISO with cutscenes + AFS swaps")
     bi.add_argument("--translations", action="store_true",
-                    help="apply edits from translations/fpb/*.json (opt-in)")
+                    help="apply edits from translations/<ext>/*.json (opt-in)")
+    bi.add_argument("--no-hardsub", action="store_true",
+                    help="use raw (no-hardsub) cutscenes; ISO output goes to ...-raw.iso")
     bi.set_defaults(func=cmd_build_iso)
-    sub.add_parser("xdelta", help="USA ISO -> patched ISO -> xdelta3").set_defaults(func=cmd_xdelta)
+
+    xd = sub.add_parser("xdelta", help="USA ISO -> patched ISO -> xdelta3")
+    xd.add_argument("--no-hardsub", action="store_true",
+                    help="diff against the raw (no-hardsub) ISO variant")
+    xd.set_defaults(func=cmd_xdelta)
+
     f = sub.add_parser("full", help="setup + cutscenes + build-iso + xdelta")
     f.add_argument("--translations", action="store_true",
-                   help="apply edits from translations/fpb/*.json (opt-in)")
+                   help="apply edits from translations/<ext>/*.json (opt-in)")
+    f.add_argument("--no-hardsub", action="store_true",
+                   help="propagated to cutscenes/build-iso/xdelta (raw variant)")
     f.set_defaults(func=cmd_full)
     sub.add_parser("translate-extract",
                    help="dump per-file translation catalogs to translations/<ext>/ for editing"

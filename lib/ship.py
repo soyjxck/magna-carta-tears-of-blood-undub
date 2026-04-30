@@ -112,6 +112,52 @@ def build_manifest(entries: list[tuple[str, bytes]]) -> bytes:
     return ("\r\n".join(lines) + "\r\n").encode("ascii")
 
 
+def _pick_entry_blob(name: str, ext: str, usa_blob: bytes | None,
+                     src_blob_reader, translations_dir: Path | None
+                     ) -> tuple[bytes, str]:
+    """Decide what bytes to write for one SHIP entry. Returns
+    ``(blob, kind)`` where ``kind`` is one of:
+
+      ``"translated_fpb"``    `.fpb` rebuilt from a translation catalog
+      ``"swapped_fpb"``       `.fpb` raw USA bytes (catalog absent / disabled)
+      ``"translated_slot"``   slot-format file rebuilt from catalog
+      ``"translated_region"`` region-overlay file rebuilt from catalog
+      ``"swapped_text"``      one of USA_TEXT_EXTS, raw USA bytes
+      ``"kept_src"``          source-region passthrough (voice/scene path)
+
+    `usa_blob` is None when the entry has no USA counterpart — caller
+    should keep source bytes in that case.
+    """
+    if usa_blob is None:
+        return src_blob_reader(), "kept_src"
+
+    if SWAP_FPB and ext == ".fpb":
+        if translations_dir is not None:
+            tx = translated_fpb_bytes(name, usa_blob,
+                                      catalog_dir=translations_dir / "fpb")
+            if tx is not None:
+                return tx, "translated_fpb"
+        return usa_blob, "swapped_fpb"
+
+    if ext in USA_TEXT_EXTS:
+        if translations_dir is not None:
+            if ext in SLOT_FORMATS:
+                tx = translated_slot_bytes(
+                    ext, name, usa_blob,
+                    catalog_dir=translations_dir / ext.lstrip("."))
+                if tx is not None:
+                    return tx, "translated_slot"
+            elif ext in REGION_OVERLAY_EXTS:
+                tx = translated_region_bytes(
+                    ext, name, usa_blob,
+                    catalog_dir=translations_dir / ext.lstrip("."))
+                if tx is not None:
+                    return tx, "translated_region"
+        return usa_blob, "swapped_text"
+
+    return src_blob_reader(), "kept_src"
+
+
 def build(out_path: Path | None = None,
           usa_ship: Path = ROOT / "work" / "usa" / "SHIP.AFS",
           src_ship: Path = ROOT / "work" / "kr" / "SHIP.AFS",
@@ -120,75 +166,36 @@ def build(out_path: Path | None = None,
     """Build a hybrid SHIP.AFS using `src_ship` (KR or JP) as the structural
     base, with USA bytes overlaid for text-bearing extensions and `.fpb`.
 
-    `translations_dir`: when set, `.fpb` files with a matching catalog at
-    `<dir>/fpb/<basename>.json` are rebuilt from that catalog (translation
-    flow). When None, raw USA bytes are used (default — vanilla undub)."""
+    `translations_dir`: when set, files with a matching catalog at
+    `<dir>/<ext>/<basename>.json` are rebuilt from that catalog
+    (translation flow). When None, raw USA bytes are used (default —
+    vanilla undub)."""
     if out_path is None:
-        # Default: build/<region>_base/SHIP.AFS  (e.g. work/jp/... -> build/jp_base/...)
+        # Default: build/<region>_base/SHIP.AFS (e.g. work/jp/... -> build/jp_base/...)
         region_tag = Path(src_ship).parent.name + "_base"
         out_path = ROOT / "build" / region_tag / "SHIP.AFS"
 
-    usa = Afs.open(usa_ship); usa_n = usa.read_filename_toc()
+    usa = Afs.open(usa_ship)
     src = Afs.open(src_ship); src_n = src.read_filename_toc()
+    usa_n = usa.read_filename_toc()
     usa_idx = {n.lower(): i for i, n in enumerate(usa_n)}
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     entries: list[tuple[str, bytes]] = []
-    swapped_text = 0
-    swapped_fpb = 0
-    translated_fpb = 0
-    translated_slot = 0
-    translated_region = 0
-    kept_src = 0
+    counts: dict[str, int] = {}
 
     with src_ship.open("rb") as fh_src, usa_ship.open("rb") as fh_usa:
         for i, name in enumerate(src_n):
             lname = name.lower()
             ext = "." + lname.rsplit(".", 1)[-1] if "." in lname else ""
-
-            if SWAP_FPB and ext == ".fpb" and lname in usa_idx:
-                usa_blob = usa.read_entry(usa_idx[lname], fh_usa)
-                # Translation catalog hook is OPT-IN: caller passes
-                # translations_dir to enable. Default builds use raw USA.
-                tx_blob = (translated_fpb_bytes(name, usa_blob,
-                                                catalog_dir=translations_dir / "fpb")
-                           if translations_dir is not None else None)
-                if tx_blob is not None:
-                    blob = tx_blob
-                    translated_fpb += 1
-                else:
-                    blob = usa_blob
-                    swapped_fpb += 1
-            elif ext in USA_TEXT_EXTS and lname in usa_idx:
-                usa_blob = usa.read_entry(usa_idx[lname], fh_usa)
-                # Translation catalog hooks (opt-in via translations_dir):
-                #  - SLOT_FORMATS: per-slot fixed-stride formats
-                #  - REGION_OVERLAY_EXTS: ASCII regions in binary
-                tx_blob = None
-                tx_kind = None
-                if translations_dir is not None:
-                    if ext in SLOT_FORMATS:
-                        tx_blob = translated_slot_bytes(
-                            ext, name, usa_blob,
-                            catalog_dir=translations_dir / ext.lstrip("."))
-                        tx_kind = "slot"
-                    elif ext in REGION_OVERLAY_EXTS:
-                        tx_blob = translated_region_bytes(
-                            ext, name, usa_blob,
-                            catalog_dir=translations_dir / ext.lstrip("."))
-                        tx_kind = "region"
-                if tx_blob is not None:
-                    blob = tx_blob
-                    if tx_kind == "slot":
-                        translated_slot += 1
-                    else:
-                        translated_region += 1
-                else:
-                    blob = usa_blob
-                    swapped_text += 1
-            else:
-                blob = src.read_entry(i, fh_src)
-                kept_src += 1
+            usa_blob = (usa.read_entry(usa_idx[lname], fh_usa)
+                        if lname in usa_idx else None)
+            blob, kind = _pick_entry_blob(
+                name, ext, usa_blob,
+                lambda: src.read_entry(i, fh_src),
+                translations_dir,
+            )
+            counts[kind] = counts.get(kind, 0) + 1
             entries.append((name, blob))
 
     # Rebuild the slot-0 manifest with the actual sizes of bytes we wrote.
@@ -210,15 +217,17 @@ def build(out_path: Path | None = None,
     if verbose:
         print(f"  source: {src_ship}")
         print(f"  total entries: {len(entries)}")
-        print(f"  USA text overlays ({len(USA_TEXT_EXTS)} exts): {swapped_text}")
-        print(f"  .fpb blanket-swapped to USA: {swapped_fpb}")
-        if translated_fpb:
-            print(f"  .fpb built from translation catalog: {translated_fpb}")
-        if translated_slot:
-            print(f"  slot-format files built from translation catalog: {translated_slot}")
-        if translated_region:
-            print(f"  region-overlay files built from translation catalog: {translated_region}")
-        print(f"  kept source-region: {kept_src}")
+        print(f"  USA text overlays ({len(USA_TEXT_EXTS)} exts): "
+              f"{counts.get('swapped_text', 0)}")
+        print(f"  .fpb blanket-swapped to USA: {counts.get('swapped_fpb', 0)}")
+        for kind, label in (
+            ("translated_fpb",    ".fpb built from translation catalog"),
+            ("translated_slot",   "slot-format files built from translation catalog"),
+            ("translated_region", "region-overlay files built from translation catalog"),
+        ):
+            if counts.get(kind):
+                print(f"  {label}: {counts[kind]}")
+        print(f"  kept source-region: {counts.get('kept_src', 0)}")
 
     write_afs(out_path, entries, toc_metadata=src_meta)
     if verbose:
