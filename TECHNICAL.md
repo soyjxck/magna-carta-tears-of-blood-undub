@@ -17,22 +17,23 @@ The patch supports two source regions — **Korean** (`SCKA-20043`) and **Japane
 7. [`.fpb` (PlayBook) format](#fpb-playbook-format)
 8. [`.pod` (Talisman tutorial popup) format](#pod-talisman-tutorial-popup-format)
 9. [`.tui` (UI label) format](#tui-ui-label-format)
-10. [SHIP.AFS UE2 4-byte stubs](#shipafs-ue2-4-byte-stubs)
-11. [LINEAR.AFS — streamed UE2 packages](#linearafs--streamed-ue2-packages)
-12. [`.lin` file format](#lin-file-format)
-13. [The 31 region-specific `.lin` files](#the-31-region-specific-lin-files)
-14. [FILE.AFS — engine packages](#fileafs--engine-packages)
-15. [`celfid.lix` — startup bundle](#celfidlix--startup-bundle)
-16. [MUSIC.AFS — disjoint voice ID namespaces](#musicafs--disjoint-voice-id-namespaces)
-17. [Cutscene SFDs](#cutscene-sfds)
-18. [The hybrid undub architecture](#the-hybrid-undub-architecture)
-19. [SHIP.AFS overlay policy](#shipafs-overlay-policy)
-20. [LINEAR.AFS overlay policy](#linearafs-overlay-policy)
-21. [Why we don't disturb the engine](#why-we-dont-disturb-the-engine)
-22. [Investigation timeline (the D-build trail)](#investigation-timeline-the-d-build-trail)
-23. [Building the patch](#building-the-patch)
-24. [Code map](#code-map)
-25. [Known limitations](#known-limitations)
+10. [Translation guide (editing the JSON catalogs)](#translation-guide-editing-the-json-catalogs)
+11. [SHIP.AFS UE2 4-byte stubs](#shipafs-ue2-4-byte-stubs)
+12. [LINEAR.AFS — streamed UE2 packages](#linearafs--streamed-ue2-packages)
+13. [`.lin` file format](#lin-file-format)
+14. [The 31 region-specific `.lin` files](#the-31-region-specific-lin-files)
+15. [FILE.AFS — engine packages](#fileafs--engine-packages)
+16. [`celfid.lix` — startup bundle](#celfidlix--startup-bundle)
+17. [MUSIC.AFS — disjoint voice ID namespaces](#musicafs--disjoint-voice-id-namespaces)
+18. [Cutscene SFDs](#cutscene-sfds)
+19. [The hybrid undub architecture](#the-hybrid-undub-architecture)
+20. [SHIP.AFS overlay policy](#shipafs-overlay-policy)
+21. [LINEAR.AFS overlay policy](#linearafs-overlay-policy)
+22. [Why we don't disturb the engine](#why-we-dont-disturb-the-engine)
+23. [Investigation timeline (the D-build trail)](#investigation-timeline-the-d-build-trail)
+24. [Building the patch](#building-the-patch)
+25. [Code map](#code-map)
+26. [Known limitations](#known-limitations)
 
 ---
 
@@ -390,6 +391,67 @@ slot ~14:          "Status"    / "情報"
 ```
 
 But — **`.tui` strings are NOT what the engine renders for the menu tabs.** The tabs are rendered from a baked TEXTURE. We confirmed this by overlaying USA `.tui` (so the patched ISO holds "Party"/"Item"/"Equip" at those exact offsets) and watching the rendered tabs stay in the source language. The fix lives in [LINEAR.AFS](#linearafs--streamed-ue2-packages), not SHIP.AFS — the texture pack with the menu-tab pixels is a `.lin` file. The `.tui` string table is used by other UI surfaces (info popups, save-prompt confirmations, possibly mouse-over tooltips), and is overlaid for those.
+
+---
+
+## Translation guide (editing the JSON catalogs)
+
+`patch.py extract-text` (or `python -m lib.translate`) writes per-file JSON catalogs under `translations/<ext>/<basename>.json` for every text-bearing SHIP entry. A translator edits the `en` strings; `build-iso` reads the catalogs back and reassembles the binary file.
+
+There are three format families, and the editing rules differ for each. **Hard rule across all three: only edit the `en` field.** Every other field — `offset`, `length`, `cap`, `tail_at`, `tail_hex`, `i`, `seq`, `header_hex`, `slot_stride`, `size` — is computed from the original USA bytes and used to drive the rebuild. Touching them silently corrupts the output. The `kr` and `jp` fields are reference strings (not used at build time); they're there so the translator can see the source-region wording.
+
+### Common constraints
+
+- **Latin-1 only.** USA fonts on this game can't render anything outside Latin-1 (no smart quotes, em-dashes, ellipsis chars, emoji). `lib/translate/_common.py:encode_en()` rejects non-Latin-1 input at build time so failures are loud, not silent. Use straight ASCII (`'`, `"`, `-`, `...`) and stick to ISO-8859-1 if you need accented Latin characters.
+- **Preserve `$n`.** `$n` is the engine's line-break token (visible in `00016900.pod` and many `.fpb` records). It's not whitespace — dropping it collapses multi-line dialog into one overflowing line. Keep the same `$n` count and approximate position the source has.
+- **Half-translated repos are fine.** When no catalog exists for a file, the build falls back to the raw USA bytes for that file, so you can ship partial coverage and iterate.
+
+### `.fpb` (windowed-pool) — soft cap, diff-remapped
+
+The catalog is one big editable `en` string holding the whole data section, plus a `windows` array of `{seq, offset, length}` entries. **Don't edit `windows`.** On rebuild, the builder diffs the old vs new `en` via `difflib.SequenceMatcher` and remaps each window's `(offset, length)` so it still bounds the same logical text in the new bytes. This is why dialog records that overlap in the original (one window covering an entire monologue, another covering one line of it) keep working after edits.
+
+- **Soft cap.** Strings can grow freely; the data-section header is rewritten with the new size. The hidden cost is that records whose final `offset + length` would lie outside the new data section get clamped to zero-length — happens in practice only if you delete text that other windows still wanted to point at.
+- **Edit semantics.** Changing a word mid-paragraph shifts every window past it; the diff handles that. What can break: rewriting the data section so aggressively that `SequenceMatcher` can't find an "equal" anchor near a window boundary will pin that window to the wrong place. If a particular dialog overshoots after rebuild, keep more of the surrounding source text intact.
+- **Keep newlines aligned.** A line of dialog that currently spans 3 game lines will still span 3 game lines after edit only if you keep roughly the same `$n` placement. The dialog box has a fixed character width (~30) and height (~3 lines).
+
+### Slot files (`.cht .odd .gft .cha .cdg .mdg .ecd .fds`) — hard cap
+
+Each catalog has a `slots` array; each slot has `i`, `cap`, `tail_at`, `en`, optionally `tail_hex`, `kr`, `jp`. The hard cap on the English string is **`tail_at - 1` bytes** (one byte reserved for the null terminator).
+
+- `tail_at` = offset where the engine-side trailer starts inside the slot. Equals `cap` when the slot has no trailer; less than `cap` for slots like `.cht`'s 16-byte option-ID block.
+- `tail_hex` (if present) is the verbatim trailer block; it is preserved across rebuild and **must not be edited**.
+- Exceeding `tail_at - 1` raises `ValueError` at build time with the offending file/slot/length, so over-budget edits don't silently truncate.
+- Slot strings are null-padded to `tail_at` on rebuild — you don't need to add nulls in the JSON.
+
+Per-extension stride (informational; the catalog's `slot_stride` mirrors this):
+
+| ext | header | stride | what it is |
+|---|---:|---:|---|
+| `.cht` | 28 | 532 | phone conversations / NPC option dialog |
+| `.odd` | 16 | 240 | side-quest text |
+| `.gft` | 16 | 74 | gift dialog |
+| `.cha` | 12 | 299 | character bios |
+| `.cdg` | 16 | 263 | talisman effect descriptions |
+| `.mdg` | 16 | 263 | monster bestiary |
+| `.ecd` | 40 | 548 | event/cutscene dialog |
+| `.fds` | 12 | 512 | friend/team dialog |
+
+### Region-overlay files (`.pod .tui .itm .abi .sgi .nod .dod .cls .att .val`) — hard cap, in-place
+
+The catalog has a `regions` array; each region has `offset`, `length`, `cap`, `en`, optionally `kr`, `jp`. The hard cap is the `cap` field directly — that's the maximum byte length of the encoded English string.
+
+- `cap` is computed from "how far this text region can grow before hitting the next non-zero structural byte (header field, sentinel, padding, etc.)". The build copies the original USA blob, then overwrites each region with the encoded `en` null-padded to `cap`. Everything else (sentinels, numeric tables, fixed-offset structure) is preserved verbatim.
+- Exceeding `cap` raises `ValueError`. There is no soft growth — these files have hard structural constraints (e.g. `.pod` is fixed 12,328 bytes across all 148 files).
+- Regions are detected as runs of printable ASCII ≥ 4 chars in the USA blob. Some "text" regions are actually internal identifiers, not user-facing labels — when in doubt, the `en` field's content tells you what's safe to translate vs leave alone.
+
+### Workflow
+
+1. `python -m lib.translate` — extracts every supported extension into `translations/`. Repeatable; safe to re-run.
+2. Edit `en` fields in the JSON catalogs. Leave everything else alone.
+3. `python patch.py build-iso --source kr|jp` — the builder reads the catalogs and reassembles each file. Files without a catalog fall back to USA bytes. Cap violations stop the build with a precise error.
+4. Apply the resulting xdelta and test in PCSX2.
+
+If the build fails with `latin-1 only`, find the offending non-Latin-1 character (smart quotes from a word processor are the usual culprit). If it fails with `string exceeds editable space` or `> cap`, tighten the translation for that record — there's no soft cap on slot/region formats. `.fpb` is forgiving on length but unforgiving on structural rewrites that erase diff anchors.
 
 ---
 

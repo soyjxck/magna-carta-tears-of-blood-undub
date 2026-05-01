@@ -98,6 +98,12 @@ USA_OVERLAY_CLASSES = ("Texture", "StaticMesh")
 # safe to plug in alongside the JP MUSIC/voice base.
 USA_OVERLAY_NAMES = frozenset({
     "00000624.lin",  # Maps/00000624.unr — title-screen / main menu
+    # ── batch HUD-investigation flip (top 4 source-kept candidates) ──
+    "00065534.lin",  # Emitter side + guardglow + 26 textures
+    "00011548.lin",  # EffScr  n_glow1 + 13 textures
+    "00011713.lin",  # EffScr  rock2 + 'cur' keyword + 9 textures
+    "00011215.lin",  # EffScr  kongpa (Korean sparring term)
+
 })
 
 
