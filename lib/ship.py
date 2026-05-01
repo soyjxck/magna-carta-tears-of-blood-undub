@@ -42,9 +42,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from cri_afs import Afs, write_afs
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
-from afs import Afs, write_afs
 from translate import (SLOT_FORMATS, REGION_OVERLAY_EXTS,
                        translated_fpb_bytes, translated_slot_bytes,
                        translated_region_bytes)

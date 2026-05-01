@@ -7,15 +7,12 @@ lives, how to encode/decode strings safely, and a small AFS open helper.
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import BinaryIO
 
+from cri_afs import Afs
+
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "lib"))
-from afs import Afs
-
-
 CATALOG_DIR = ROOT / "translations"
 
 

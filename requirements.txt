@@ -1,4 +1,5 @@
 sfd-muxer
+cri-afs
 
 # External tools needed on PATH (install via brew/apt):
 #   ffmpeg (with libass) — auto-built into work/tools/ if not present

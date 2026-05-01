@@ -150,9 +150,9 @@ Once `?GameMode=Title` is set, the engine loads `00000624.unr` (the title-screen
                  16 B metadata trailer (mostly zero, last 4 B is region-specific)
 ```
 
-The 48-byte filename TOC at the end is what `lib/afs.py:read_filename_toc()` uses to identify entries by name. The 16-byte trailer is mostly inert — D34 confirmed the engine doesn't validate it.
+The 48-byte filename TOC at the end is what `cri_afs.Afs.read_filename_toc()` uses to identify entries by name. The 16-byte trailer is mostly inert — D34 confirmed the engine doesn't validate it.
 
-**Sector alignment**: every entry blob is padded to a 0x800 (2048-byte) sector boundary. `lib/afs.py:write_afs()` regenerates a valid AFS from a list of `(name, blob)` pairs by recomputing offsets fresh.
+**Sector alignment**: every entry blob is padded to a 0x800 (2048-byte) sector boundary. `cri_afs.write_afs()` regenerates a valid AFS from a list of `(name, blob)` pairs by recomputing offsets fresh.
 
 The primary TOC's `size` field is just a parser convenience — it is **not** what the engine uses to decide how many bytes to read for a named entry. That comes from the slot-0 manifest, below.
 
@@ -946,7 +946,7 @@ Apply with: `xdelta3 -d -s 'Magna Carta - Tears of Blood (USA).iso' magna-carta-
 | Module | Role |
 |---|---|
 | `patch.py` | CLI entry point: `setup` / `cutscenes` / `build-iso` / `xdelta` / `full`. Region selected with `--source kr|jp`. |
-| `lib/afs.py` | CRI AFS reader + writer. Round-trips byte-identically. |
+| `cri-afs` (PyPI) | CRI AFS reader + writer. Round-trips byte-identically. Used to be `lib/afs.py`; extracted so the FMA repos and other PS2/Dreamcast/GameCube projects can share it. [PyPI](https://pypi.org/project/cri-afs/) · [Repo](https://github.com/soyjxck/cri-afs). |
 | `lib/iso.py` | Patches the source USA ISO in place: writes new bytes at original LBAs when they fit, relocates past original ISO end + updates ISO9660 directory entries + grows PVD when they don't. |
 | `lib/ship.py` | **Canonical** hybrid SHIP.AFS builder (D37/D39 architecture). Per-extension USA overlay + slot-0 manifest rebuild. |
 | `lib/linear.py` | **Canonical** hybrid LINEAR.AFS builder (D38/D40 architecture). Per-class + per-name USA overlay + slot-0 manifest rebuild. |
