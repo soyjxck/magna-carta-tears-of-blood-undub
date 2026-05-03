@@ -133,7 +133,25 @@ def extract_all_slot(ext: str,
                      kr_ship: Path | None,
                      jp_ship: Path | None,
                      out_dir: Path) -> int:
-    """Extract every file of ``ext`` in USA SHIP into per-file JSON catalogs."""
+    """Extract every file of ``ext`` in USA SHIP into per-file JSON catalogs.
+
+    Catalog shape (one slot per array entry; array index = slot index)::
+
+        {
+          "file": "<name>.<ext>",
+          "ext": "<ext>",
+          "slots": [
+            {"en": "...", "kr": "...", "jp": "..."},
+            ...
+          ]
+        }
+
+    All structural fields (cap, tail_at, tail_hex, header_hex, slot_stride)
+    are derived from USA bytes at rebuild time — the translator only sees the
+    text. KR/JP slots are matched by array position (the format is
+    fixed-stride, so slot N in USA == slot N in KR/JP for the same logical
+    record).
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     usa, usa_idx, kr_pair, jp_pair, fhs = open_ship_handles(
         usa_ship, kr_ship, jp_ship)
@@ -145,7 +163,7 @@ def extract_all_slot(ext: str,
                 continue
             try:
                 u_blob = usa.read_entry(i, fhs["usa"])
-                u_hdr, u_slots = parse_slot_file(u_blob, ext)
+                _, u_slots = parse_slot_file(u_blob, ext)
             except ValueError:
                 continue
 
@@ -168,24 +186,14 @@ def extract_all_slot(ext: str,
 
             slots_out: list[dict] = []
             for k, (slot, cap) in enumerate(u_slots):
-                _, tail_at, tail_bytes = split_slot(slot, cap)
-                rec: dict = {"i": k, "cap": cap, "tail_at": tail_at,
-                             "en": _slot_text(slot, "latin-1", cap)}
-                if tail_bytes:
-                    rec["tail_hex"] = tail_bytes.hex()
+                rec: dict = {"en": _slot_text(slot, "latin-1", cap)}
                 if k < len(k_slots):
                     rec["kr"] = _slot_text(k_slots[k][0], "cp949", k_slots[k][1])
                 if k < len(j_slots):
                     rec["jp"] = _slot_text(j_slots[k][0], "shift_jis", j_slots[k][1])
                 slots_out.append(rec)
 
-            cat = {
-                "file": name,
-                "ext": ext,
-                "header_hex": u_hdr.hex(),
-                "slot_stride": SLOT_FORMATS[ext][1],
-                "slots": slots_out,
-            }
+            cat = {"file": name, "ext": ext, "slots": slots_out}
             (out_dir / f"{Path(name).stem}.json").write_text(
                 json.dumps(cat, ensure_ascii=False, indent=2),
                 encoding="utf-8",
@@ -199,8 +207,13 @@ def extract_all_slot(ext: str,
 
 def translated_slot_bytes(ext: str, name: str, usa_blob: bytes,
                           catalog_dir: Path | None = None) -> bytes | None:
-    """Build slot-format bytes from a translation catalog, or return None
-    when no catalog exists (caller falls back to raw USA bytes)."""
+    """Rebuild slot-format bytes from a translation catalog. Returns None
+    when no catalog exists OR no slot was actually edited (caller falls back
+    to raw USA bytes — preserves byte-identical round-trip).
+
+    All structural fields are read fresh from USA bytes; only the
+    translator's ``en`` is taken from the catalog.
+    """
     if catalog_dir is None:
         catalog_dir = CATALOG_DIR / ext.lstrip(".")
     cat_path = catalog_dir / f"{Path(name).stem}.json"
@@ -209,19 +222,30 @@ def translated_slot_bytes(ext: str, name: str, usa_blob: bytes,
     cat = json.loads(cat_path.read_text(encoding="utf-8"))
     if cat.get("ext") != ext:
         raise ValueError(f"{cat_path}: catalog ext {cat.get('ext')!r} != {ext!r}")
-    header = bytes.fromhex(cat["header_hex"])
-    _, orig_slots = parse_slot_file(usa_blob, ext)
-    by_index = {int(r["i"]): r for r in cat["slots"] if "i" in r}
+
+    header, orig_slots = parse_slot_file(usa_blob, ext)
+    cat_slots = cat.get("slots", [])
+
+    # Edit detection: any slot whose en differs from USA's text? If nothing
+    # changed, return None so the caller writes USA bytes verbatim.
+    if len(cat_slots) == len(orig_slots):
+        any_edit = False
+        for rec, (slot, cap) in zip(cat_slots, orig_slots):
+            usa_string, _, _ = split_slot(slot, cap)
+            usa_en = usa_string.decode("latin-1", errors="replace")
+            if rec.get("en", "") != usa_en:
+                any_edit = True
+                break
+        if not any_edit:
+            return None
+
     new_entries: list[tuple[bytes, int, int, bytes]] = []
     for k, (slot, cap) in enumerate(orig_slots):
         orig_string, orig_tail_at, orig_tail = split_slot(slot, cap)
-        rec = by_index.get(k)
+        rec = cat_slots[k] if k < len(cat_slots) else None
         if rec is None or "en" not in rec:
             new_entries.append((orig_string, cap, orig_tail_at, orig_tail))
             continue
         s = encode_en(rec["en"])
-        rec_cap = int(rec.get("cap", cap))
-        rec_tail_at = int(rec.get("tail_at", orig_tail_at))
-        rec_tail = bytes.fromhex(rec["tail_hex"]) if rec.get("tail_hex") else orig_tail
-        new_entries.append((s, rec_cap, rec_tail_at, rec_tail))
+        new_entries.append((s, cap, orig_tail_at, orig_tail))
     return build_slot_file(header, new_entries, ext)

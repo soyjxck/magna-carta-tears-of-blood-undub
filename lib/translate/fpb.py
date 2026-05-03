@@ -36,6 +36,40 @@ from ._common import (CATALOG_DIR, decode_safe, encode_en, open_ship_handles)
 Window = tuple[int, int, int]  # (seq, offset, length)
 
 
+def synthesize_implicit_seq0(windows: list[Window],
+                             data_len: int | None = None) -> list[Window]:
+    """Prepend a synthetic ``seq=0`` window covering the bytes before the
+    first explicit window (or the whole data section if there are none).
+
+    By convention, every byte of an .fpb's data section belongs to some
+    record. When the first explicit window starts past offset 0, the
+    bytes before it form an implicit ``seq=0`` record (verified across
+    all 652 .fpb files in Magna Carta — none start at offset 0 unless
+    they explicitly include a ``seq=0`` entry). When a file has zero
+    explicit windows but a non-empty data section (65 / 711 .fpb files),
+    the entire data section is the implicit ``seq=0``.
+
+    No-op when:
+      - the first window already starts at offset 0, or
+      - any window already has ``seq == 0`` (the record is explicit), or
+      - windows is empty and ``data_len`` is None or 0.
+
+    The synthesized window is purely a view: the on-disk format does not
+    store ``seq=0`` for files using the implicit convention, and
+    ``build_fpb`` doesn't write it. Round-trip is preserved.
+    """
+    if any(seq == 0 for seq, _, _ in windows):
+        return list(windows)
+    if not windows:
+        if data_len:
+            return [(0, 0, data_len)]
+        return []
+    first_offset = windows[0][1]
+    if first_offset == 0:
+        return list(windows)
+    return [(0, 0, first_offset)] + list(windows)
+
+
 # --------------------------------------------------------------------------- parse / build
 
 def parse_fpb_raw(blob: bytes) -> tuple[bytes, list[Window], bytes]:
@@ -139,24 +173,41 @@ def remap_windows(old_text: str, old_windows: list[Window],
 
 # --------------------------------------------------------------------------- catalog I/O
 
-def _read_data_section(afs, idx: dict[str, int], name: str, fh) -> bytes | None:
-    """Return the data section of `name` from `afs` (decoded as raw bytes),
-    or None if the file is missing or malformed."""
-    if name.lower() not in idx:
-        return None
-    blob = afs.read_entry(idx[name.lower()], fh)
+def _records_for(blob: bytes, encoding: str) -> tuple[list[Window], bytes] | None:
+    """Parse a region's .fpb and synthesize the implicit seq=0 record so the
+    returned windows fully partition the data section. Returns None on parse
+    failure. The encoding arg is kept for API symmetry with future callers."""
     try:
-        _, _, data = parse_fpb_raw(blob)
+        _, windows, data = parse_fpb_raw(blob)
     except ValueError:
         return None
-    return data
+    return synthesize_implicit_seq0(windows, data_len=len(data)), data
 
 
 def extract_all_fpb(usa_ship: Path,
                     kr_ship: Path | None,
                     jp_ship: Path | None,
                     out_dir: Path) -> int:
-    """Extract every ``.fpb`` in USA SHIP into per-file JSON catalogs."""
+    """Extract every ``.fpb`` in USA SHIP into per-file JSON catalogs.
+
+    Catalog shape (one record per dialog line, with cross-language refs)::
+
+        {
+          "file": "<name>.fpb",
+          "records": [
+            {"seq": 0, "en": "...", "kr": "...", "jp": "..."},
+            {"seq": 1, "en": "...", "kr": "...", "jp": "..."},
+            ...
+          ]
+        }
+
+    KR/JP text is sliced per-record using each region's own ``(offset, length)``
+    windows, matched to USA's records by ``seq`` ID. Records that exist in USA
+    but not in KR/JP (the 21 / 707 files with localization-branch deltas) get
+    no ``kr`` / ``jp`` field on the unmatched record. The implicit ``seq=0``
+    prefix is materialized as the first record so every byte of the data
+    section is addressable in the catalog.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     usa, usa_idx, kr_pair, jp_pair, fhs = open_ship_handles(
         usa_ship, kr_ship, jp_ship)
@@ -167,25 +218,44 @@ def extract_all_fpb(usa_ship: Path,
             if not name.lower().endswith(".fpb"):
                 continue
             usa_blob = usa.read_entry(i, fhs["usa"])
-            try:
-                _, windows, usa_data = parse_fpb_raw(usa_blob)
-            except ValueError:
+            usa_parsed = _records_for(usa_blob, "latin-1")
+            if usa_parsed is None:
                 continue
-            cat: dict = {
-                "file": name,
-                "en": decode_safe(usa_data, "latin-1"),
-            }
-            if kr_pair is not None:
-                kr_data = _read_data_section(kr_pair[0], kr_pair[1], name, fhs["kr"])
-                if kr_data is not None:
-                    cat["kr"] = decode_safe(kr_data, "cp949")
-            if jp_pair is not None:
-                jp_data = _read_data_section(jp_pair[0], jp_pair[1], name, fhs["jp"])
-                if jp_data is not None:
-                    cat["jp"] = decode_safe(jp_data, "shift_jis")
-            cat["windows"] = [
-                {"seq": s, "offset": o, "length": l} for s, o, l in windows
-            ]
+            usa_windows, usa_data = usa_parsed
+
+            kr_by_seq: dict[int, tuple[int, int]] = {}
+            kr_data = b""
+            if kr_pair is not None and name.lower() in kr_pair[1]:
+                blob = kr_pair[0].read_entry(kr_pair[1][name.lower()], fhs["kr"])
+                p = _records_for(blob, "cp949")
+                if p is not None:
+                    kr_w, kr_data = p
+                    kr_by_seq = {s: (o, l) for s, o, l in kr_w}
+
+            jp_by_seq: dict[int, tuple[int, int]] = {}
+            jp_data = b""
+            if jp_pair is not None and name.lower() in jp_pair[1]:
+                blob = jp_pair[0].read_entry(jp_pair[1][name.lower()], fhs["jp"])
+                p = _records_for(blob, "shift_jis")
+                if p is not None:
+                    jp_w, jp_data = p
+                    jp_by_seq = {s: (o, l) for s, o, l in jp_w}
+
+            records: list[dict] = []
+            for seq, off, ln in usa_windows:
+                rec: dict = {
+                    "seq": seq,
+                    "en": decode_safe(usa_data[off:off + ln], "latin-1"),
+                }
+                if seq in kr_by_seq:
+                    ko, kl = kr_by_seq[seq]
+                    rec["kr"] = decode_safe(kr_data[ko:ko + kl], "cp949")
+                if seq in jp_by_seq:
+                    jo, jl = jp_by_seq[seq]
+                    rec["jp"] = decode_safe(jp_data[jo:jo + jl], "shift_jis")
+                records.append(rec)
+
+            cat = {"file": name, "records": records}
             (out_dir / f"{Path(name).stem}.json").write_text(
                 json.dumps(cat, ensure_ascii=False, indent=2),
                 encoding="utf-8",
@@ -200,20 +270,55 @@ def extract_all_fpb(usa_ship: Path,
 def translated_fpb_bytes(name: str, usa_blob: bytes,
                          catalog_dir: Path = CATALOG_DIR / "fpb"
                          ) -> bytes | None:
-    """Build ``.fpb`` bytes from a translation catalog. Returns None when
-    no catalog exists for ``name`` so the caller falls back to raw USA
-    bytes — a half-translated repo still produces a working ISO."""
+    """Build ``.fpb`` bytes from a per-record translation catalog. Returns
+    None when no catalog exists OR no record was actually edited so the
+    caller falls back to raw USA bytes (preserves byte-identical round-trip
+    even for the 6 .fpb files that have pool bytes outside any record).
+
+    When edited: encode each record's ``en`` to latin-1, concatenate into a
+    fresh data section, and compute windows as ``(seq, running_offset, len)``.
+    No diff-remap needed — the catalog already pairs each record with its
+    own text. If USA used the implicit-seq=0 convention (every file we've
+    seen except 6), the synthetic seq=0 window is dropped from the output
+    so the on-disk format matches the original layout.
+    """
     cat_path = catalog_dir / f"{Path(name).stem}.json"
     if not cat_path.exists():
         return None
     cat = json.loads(cat_path.read_text(encoding="utf-8"))
-    header16, orig_windows, orig_data = parse_fpb_raw(usa_blob)
-    orig_en = orig_data.decode("latin-1")
-    new_en = cat["en"]
-    new_data = encode_en(new_en)
-    if new_en == orig_en:
-        # No edit detected — preserve windows verbatim for a byte-identical rebuild
-        windows = orig_windows
-    else:
-        windows = remap_windows(orig_en, orig_windows, new_en)
-    return build_fpb(header16, windows, new_data)
+    cat_records = cat.get("records", [])
+
+    header16, usa_orig_windows, usa_data = parse_fpb_raw(usa_blob)
+    usa_synth = synthesize_implicit_seq0(usa_orig_windows, data_len=len(usa_data))
+
+    # Edit detection: any record whose en differs from USA's slice for that
+    # window? If nothing changed, return None so the caller writes USA's
+    # bytes verbatim — pool data outside any window is preserved.
+    if len(cat_records) == len(usa_synth):
+        any_edit = False
+        for rec, (_, off, ln) in zip(cat_records, usa_synth):
+            usa_en = usa_data[off:off + ln].decode("latin-1", errors="replace")
+            if rec.get("en", "") != usa_en:
+                any_edit = True
+                break
+        if not any_edit:
+            return None
+
+    # At least one record was edited (or catalog count diverges). Rebuild
+    # mechanically by concatenating each record's encoded en.
+    usa_has_explicit_seq0 = any(s == 0 for s, _, _ in usa_orig_windows)
+    data = bytearray()
+    windows: list[Window] = []
+    for rec in cat_records:
+        seq = int(rec["seq"])
+        en_bytes = encode_en(rec.get("en", ""))
+        offset = len(data)
+        windows.append((seq, offset, len(en_bytes)))
+        data += en_bytes
+
+    # Drop synthetic seq=0 if USA used the implicit convention.
+    if (not usa_has_explicit_seq0 and windows
+            and windows[0][0] == 0 and windows[0][1] == 0):
+        windows = windows[1:]
+
+    return build_fpb(header16, windows, bytes(data))

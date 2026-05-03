@@ -94,8 +94,12 @@ Per-file JSON catalogs let you replace the official ATLUS USA English with your 
 ```bash
 python3 patch.py translate-extract               # bootstrap catalogs from your ISOs
 # ...edit translations/<ext>/<basename>.json's `en` fields...
+python3 patch.py translate-validate              # check for cap/encoding errors
+python3 patch.py translate-status                # see how much is done
 python3 patch.py --source kr build-iso --translations
 ```
+
+See [`TRANSLATING.md`](TRANSLATING.md) for the translator-facing guide — what fields to edit, length caps per format, common errors and fixes.
 
 Catalogs cover every text-bearing file in SHIP.AFS — 995 files across `.fpb` (dialog), `.cht` (phone conversations), `.pod` (Talisman tutorials), `.tui` (UI labels), `.itm` (item names + descriptions), `.cha` (character bios), `.abi` (abilities), `.sgi` (combat styles), `.cdg`/`.mdg` (talisman effects + monster bestiary), and 10 others. Each catalog includes the USA English plus KR/JP reference text so you can see how the original phrased it. The `translations/` directory is gitignored — catalogs are derived from the user's own ISO and stay local.
 

@@ -82,12 +82,44 @@ def _src_text_at(blob: bytes | None, offset: int, cap: int,
     return src_bytes.decode(encoding, errors="replace")
 
 
+def _detect_regions(blob: bytes) -> list[tuple[int, int, int]]:
+    """Return ``[(offset, length, cap), ...]`` for every detected text region.
+
+    Wraps ``find_text_regions`` and computes per-region capacity (how far
+    the string can grow before hitting the next non-zero structural byte).
+    The build path uses this to know where to write each catalog entry's
+    ``en`` and how much room is available.
+    """
+    regions = find_text_regions(blob)
+    out: list[tuple[int, int, int]] = []
+    for k, (offset, length) in enumerate(regions):
+        next_start = regions[k + 1][0] if k + 1 < len(regions) else None
+        cap = _region_capacity(blob, offset, length, next_start)
+        out.append((offset, length, cap))
+    return out
+
+
 def extract_all_region(ext: str,
                        usa_ship: Path,
                        kr_ship: Path | None,
                        jp_ship: Path | None,
                        out_dir: Path) -> int:
-    """Extract every USA file of ``ext`` into a per-file JSON catalog."""
+    """Extract every USA file of ``ext`` into a per-file JSON catalog.
+
+    Catalog shape (one region per array entry; array index = region index)::
+
+        {
+          "file": "<name>.<ext>",
+          "ext": "<ext>",
+          "regions": [
+            {"en": "...", "kr": "...", "jp": "..."},
+            ...
+          ]
+        }
+
+    All structural fields (offset, length, cap, file size) are derived from
+    USA bytes at rebuild time — the translator only sees the text.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     usa, usa_idx, kr_pair, jp_pair, fhs = open_ship_handles(
         usa_ship, kr_ship, jp_ship)
@@ -98,7 +130,7 @@ def extract_all_region(ext: str,
             if not name.lower().endswith(ext):
                 continue
             usa_blob = usa.read_entry(i, fhs["usa"])
-            regions = find_text_regions(usa_blob)
+            regions = _detect_regions(usa_blob)
             if not regions:
                 continue
             kr_blob = (kr_pair[0].read_entry(kr_pair[1][name.lower()], fhs["kr"])
@@ -109,14 +141,9 @@ def extract_all_region(ext: str,
                        else None)
 
             cat_regions: list[dict] = []
-            for k, (offset, length) in enumerate(regions):
-                next_start = regions[k + 1][0] if k + 1 < len(regions) else None
-                cap = _region_capacity(usa_blob, offset, length, next_start)
+            for offset, length, cap in regions:
                 rec: dict = {
-                    "offset": offset,
-                    "length": length,
-                    "cap": cap,
-                    "en": decode_safe(usa_blob[offset:offset+length], "latin-1"),
+                    "en": decode_safe(usa_blob[offset:offset + length], "latin-1"),
                 }
                 kr_text = _src_text_at(kr_blob, offset, cap, "cp949")
                 if kr_text is not None:
@@ -126,12 +153,7 @@ def extract_all_region(ext: str,
                     rec["jp"] = jp_text
                 cat_regions.append(rec)
 
-            cat = {
-                "file": name,
-                "ext": ext,
-                "size": len(usa_blob),
-                "regions": cat_regions,
-            }
+            cat = {"file": name, "ext": ext, "regions": cat_regions}
             (out_dir / f"{Path(name).stem}.json").write_text(
                 json.dumps(cat, ensure_ascii=False, indent=2),
                 encoding="utf-8",
@@ -146,12 +168,12 @@ def extract_all_region(ext: str,
 def translated_region_bytes(ext: str, name: str, usa_blob: bytes,
                             catalog_dir: Path | None = None
                             ) -> bytes | None:
-    """Apply translation catalog edits to ``usa_blob``. Returns the new
-    bytes, or None if no catalog exists (caller falls back to USA).
+    """Apply catalog edits to ``usa_blob``. Returns None when no catalog
+    exists OR no region was actually edited (caller falls back to USA —
+    preserves byte-identical round-trip).
 
-    Strategy: copy USA bytes, then overwrite each catalog region with
-    the translator's encoded ``en``, null-padded to the region's ``cap``.
-    Capacity overruns raise ValueError so the caller surfaces them.
+    Region offsets and caps are read fresh from USA bytes; only the
+    translator's ``en`` is taken from the catalog.
     """
     if catalog_dir is None:
         catalog_dir = CATALOG_DIR / ext.lstrip(".")
@@ -161,17 +183,26 @@ def translated_region_bytes(ext: str, name: str, usa_blob: bytes,
     cat = json.loads(cat_path.read_text(encoding="utf-8"))
     if cat.get("ext") != ext:
         raise ValueError(f"{cat_path}: catalog ext {cat.get('ext')!r} != {ext!r}")
-    expected_size = int(cat.get("size", len(usa_blob)))
-    if expected_size != len(usa_blob):
-        raise ValueError(
-            f"{cat_path}: catalog size {expected_size} != USA blob {len(usa_blob)}"
-        )
+
+    usa_regions = _detect_regions(usa_blob)
+    cat_regions = cat.get("regions", [])
+
+    # Edit detection: any region whose en differs from USA?
+    if len(cat_regions) == len(usa_regions):
+        any_edit = False
+        for rec, (offset, length, _cap) in zip(cat_regions, usa_regions):
+            usa_en = usa_blob[offset:offset + length].decode(
+                "latin-1", errors="replace")
+            if rec.get("en", "") != usa_en:
+                any_edit = True
+                break
+        if not any_edit:
+            return None
+
     out = bytearray(usa_blob)
-    for k, rec in enumerate(cat["regions"]):
+    for k, ((offset, _length, cap), rec) in enumerate(zip(usa_regions, cat_regions)):
         if "en" not in rec:
             continue
-        offset = int(rec["offset"])
-        cap = int(rec["cap"])
         s = encode_en(rec["en"])
         if len(s) > cap:
             raise ValueError(

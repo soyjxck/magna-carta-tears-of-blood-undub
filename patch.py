@@ -33,6 +33,14 @@ Subcommands
                      conversations, .tui UI labels, etc.). Edit the `en`
                      fields, then re-run `build-iso --translations`.
 
+  translate-validate Pre-build sanity check for translations/ — reports cap
+                     violations, latin-1 errors, dropped $n tokens, and
+                     accidentally-edited read-only fields with file:record
+                     precision. Exits non-zero on errors.
+
+  translate-status   Per-extension progress table: how many records are
+                     edited vs untouched. See TRANSLATING.md.
+
   dump-mkv           Dump KR or JP cutscenes to MKV files for review,
                      optionally with English subs hardsubbed via libass.
                      Output: build/cutscene-dumps/<region>[-hardsub]/.
@@ -58,7 +66,7 @@ from ffmpeg import find_or_build_ffmpeg
 from iso import patch_iso
 from linear import build as build_linear
 from ship import build as build_ship
-from translate import extract_all, CATALOG_DIR
+from translate import extract_all, CATALOG_DIR, audit_all, format_status_table
 
 DEFAULT_USA_ISO = ROOT / "roms" / "Magna Carta - Tears of Blood (USA).iso"
 DEFAULT_SOURCE_ISOS = {
@@ -218,6 +226,41 @@ def cmd_translate_extract(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_translate_validate(args: argparse.Namespace) -> int:
+    """Audit every JSON catalog under translations/. Prints issues with
+    file:record precision and exits non-zero if any errors are found."""
+    usa = WORK / "usa" / "SHIP.AFS"
+    if not usa.exists():
+        sys.exit("USA SHIP.AFS missing — run `patch.py setup` first")
+    if not CATALOG_DIR.exists():
+        sys.exit(f"{CATALOG_DIR} missing — run `patch.py translate-extract` first")
+    issues, _ = audit_all(usa, CATALOG_DIR)
+    n_err = sum(1 for i in issues if i.level == "error")
+    n_warn = sum(1 for i in issues if i.level == "warn")
+    if not issues:
+        print("  no issues found.")
+        return 0
+    for i in issues:
+        print(i.format(root=ROOT))
+    print(f"\n  {n_err} error(s), {n_warn} warning(s).")
+    return 1 if n_err else 0
+
+
+def cmd_translate_status(args: argparse.Namespace) -> int:
+    """Per-extension translation progress: how many records have been edited."""
+    usa = WORK / "usa" / "SHIP.AFS"
+    if not usa.exists():
+        sys.exit("USA SHIP.AFS missing — run `patch.py setup` first")
+    if not CATALOG_DIR.exists():
+        sys.exit(f"{CATALOG_DIR} missing — run `patch.py translate-extract` first")
+    _, status = audit_all(usa, CATALOG_DIR)
+    if not status:
+        print("  no catalogs found under translations/")
+        return 0
+    print(format_status_table(status))
+    return 0
+
+
 def cmd_full(args: argparse.Namespace) -> int:
     cmd_setup(args)
     cmd_cutscenes(args)
@@ -261,6 +304,13 @@ def main() -> int:
     sub.add_parser("translate-extract",
                    help="dump per-file translation catalogs to translations/<ext>/ for editing"
                    ).set_defaults(func=cmd_translate_extract)
+    sub.add_parser("translate-validate",
+                   help="audit translations/ JSON catalogs for cap violations, "
+                        "latin-1 errors, and edited read-only fields"
+                   ).set_defaults(func=cmd_translate_validate)
+    sub.add_parser("translate-status",
+                   help="show per-extension translation progress (edited vs untouched)"
+                   ).set_defaults(func=cmd_translate_status)
     dm = sub.add_parser("dump-mkv",
                         help="dump KR/JP cutscenes as MKV (optional --hardsub)")
     dm.add_argument("--regions", default="kr,jp",
