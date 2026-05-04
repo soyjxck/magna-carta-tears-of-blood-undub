@@ -90,6 +90,53 @@ def _token_drop_warning(usa_en: str, cat_en: str) -> str | None:
     return f"engine tokens dropped: {', '.join(missing)} (don't translate these — they're runtime instructions)"
 
 
+# Game-derived dialog-box rendering constraints (measured from USA's text):
+#   p99 line length between $n is 59 chars; the safe target is 50.
+#   p99 $n count per record is 6. Beyond that the dialog box overflows.
+_FPB_LINE_SOFT_MAX = 50    # warn above this
+_FPB_LINE_HARD_MAX = 60    # past this it almost certainly overflows the box
+_FPB_NL_SOFT_MAX = 6       # warn above this
+
+
+def _fpb_layout_warnings(en: str) -> list[str]:
+    """Return human-readable warnings about dialog-box layout, or []."""
+    warns: list[str] = []
+    # USA's text never starts or ends with $n; doing so causes the line break
+    # to bleed into the adjacent dialog window's blank space.
+    if en.startswith("$n"):
+        warns.append("starts with $n — line break bleeds into the previous "
+                     "dialog window; remove the leading $n")
+    if en.endswith("$n"):
+        warns.append("ends with $n — line break bleeds into the next dialog "
+                     "window; remove the trailing $n")
+    if re.search(r"(\$n){3,}", en):
+        warns.append("contains 3+ consecutive $n tokens — collapse to at most "
+                     "$n$n (one blank line)")
+    # Strip $D<NN> markers — they're zero-width in render
+    visible = re.sub(r"\$D\d+", "", en)
+    # Drop angle-bracket UI labels — those render compact
+    visible = re.sub(r"<[^>]+>", "", visible)
+    # Lines = chunks between $n
+    longest = max((len(line) for line in visible.split("$n")), default=0)
+    if longest > _FPB_LINE_HARD_MAX:
+        warns.append(
+            f"longest line is {longest} chars (>{_FPB_LINE_HARD_MAX}) — "
+            f"will overflow the dialog box; insert $n to wrap"
+        )
+    elif longest > _FPB_LINE_SOFT_MAX:
+        warns.append(
+            f"longest line is {longest} chars (target {_FPB_LINE_SOFT_MAX}) — "
+            f"may overflow the dialog box on some scenes"
+        )
+    nl = en.count("$n")
+    if nl > _FPB_NL_SOFT_MAX:
+        warns.append(
+            f"{nl} $n tokens (target {_FPB_NL_SOFT_MAX}) — "
+            f"dialog box renders ~3-4 lines; extra $n likely overflow"
+        )
+    return warns
+
+
 # --------------------------------------------------------------------------- format-specific audits
 
 
@@ -149,6 +196,8 @@ def _audit_fpb(catalog_path: Path, usa_blob: bytes,
             warn = _token_drop_warning(usa_en, cat_en)
             if warn is not None:
                 issues.append(Issue(catalog_path, loc, "en", "warn", warn))
+            for layout_warn in _fpb_layout_warnings(cat_en):
+                issues.append(Issue(catalog_path, loc, "en", "warn", layout_warn))
             status.edited_records += 1
             file_edited = True
         status.total_records += 1
@@ -298,14 +347,119 @@ def _audit_region(ext: str, catalog_path: Path, usa_blob: bytes,
     return issues
 
 
+def _audit_celfid(catalog_path: Path, usa_file_afs: Path,
+                  status: ExtStatus) -> list[Issue]:
+    """Validate ``translations/celfid.json`` against USA's celfid.lix bytes."""
+    from .celfid import _read_celfid, _string_at  # local import to avoid cycles
+
+    issues: list[Issue] = []
+    try:
+        cat = json.loads(catalog_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        return [Issue(catalog_path, "file", "", "error", f"invalid JSON: {e}")]
+
+    if cat.get("file") != "celfid.lix":
+        issues.append(Issue(catalog_path, "header", "file",
+                            "error",
+                            f"wrong file: {cat.get('file')!r} != 'celfid.lix'"))
+
+    try:
+        decomp = _read_celfid(usa_file_afs)
+    except Exception as e:
+        return [Issue(catalog_path, "file", "", "error",
+                      f"can't read USA celfid.lix: {e}")]
+
+    cat_slots = cat.get("slots", [])
+    file_edited = False
+
+    for k, rec in enumerate(cat_slots):
+        loc = f"slots[{k}]"
+        marker_hex = rec.get("marker", "")
+        max_bytes = rec.get("max_bytes")
+        cat_en = rec.get("en", "")
+        if not isinstance(marker_hex, str) or not isinstance(max_bytes, int):
+            issues.append(Issue(catalog_path, loc, "marker/max_bytes",
+                                "error",
+                                "missing or wrong-type marker / max_bytes "
+                                "(don't remove these — re-extract if needed)"))
+            status.total_records += 1
+            continue
+        try:
+            marker = bytes.fromhex(marker_hex)
+        except ValueError:
+            issues.append(Issue(catalog_path, loc, "marker", "error",
+                                "marker is not valid hex"))
+            status.total_records += 1
+            continue
+
+        # Locate the slot in USA — marker must still resolve uniquely.
+        # Multiple matches mean the marker can't safely identify ONE slot
+        # (e.g. someone edited the marker to all zeros, which happens to
+        # match many positions); patcher would land on the wrong one.
+        n_matches = decomp.count(marker)
+        if n_matches == 0:
+            issues.append(Issue(catalog_path, loc, "marker", "error",
+                                "marker not found in USA celfid.lix "
+                                "(re-extract — USA bytes drifted?)"))
+            status.total_records += 1
+            continue
+        if n_matches > 1:
+            issues.append(Issue(catalog_path, loc, "marker", "error",
+                                f"marker matches {n_matches} positions in USA "
+                                f"celfid.lix — not unique, patcher would land "
+                                f"on the wrong slot. Re-extract."))
+            status.total_records += 1
+            continue
+        idx = decomp.find(marker)
+        slot_start = idx + len(marker)
+        usa_en, _ = _string_at(decomp, slot_start, encoding="latin-1")
+
+        if not isinstance(cat_en, str):
+            issues.append(Issue(catalog_path, loc, "en", "error",
+                                f"expected string, got {type(cat_en).__name__}"))
+            status.total_records += 1
+            continue
+
+        encoded, err = _try_encode_latin1(cat_en)
+        if err is not None:
+            issues.append(Issue(catalog_path, loc, "en", "error", err))
+            status.total_records += 1
+            continue
+
+        # Cap: max_bytes - 1 (one byte reserved for null terminator)
+        cap = max_bytes - 1
+        if len(encoded) > cap:
+            issues.append(Issue(
+                catalog_path, loc, "en", "error",
+                f"{len(encoded)} bytes > cap {cap} "
+                f"(slot's null-padded capacity is {max_bytes}; "
+                f"1 byte reserved for terminator)"
+            ))
+
+        if cat_en != usa_en:
+            warn = _token_drop_warning(usa_en, cat_en)
+            if warn is not None:
+                issues.append(Issue(catalog_path, loc, "en", "warn", warn))
+            status.edited_records += 1
+            file_edited = True
+        status.total_records += 1
+
+    if file_edited:
+        status.files_with_edits += 1
+    status.files_total = 1
+    return issues
+
+
 # --------------------------------------------------------------------------- entry point
 
 
 def audit_all(usa_ship: Path,
-              catalog_root: Path = CATALOG_DIR
+              catalog_root: Path = CATALOG_DIR,
+              usa_file_afs: Path | None = None
               ) -> tuple[list[Issue], dict[str, ExtStatus]]:
-    """Walk every catalog under ``catalog_root``, audit each against USA SHIP,
-    and return (issues, per-extension status). Single pass over both."""
+    """Walk every catalog under ``catalog_root``, audit each against USA SHIP
+    (and ``celfid.lix`` inside USA FILE.AFS, when ``usa_file_afs`` is given),
+    return (issues, per-extension status). Single pass over both."""
     usa = Afs.open(usa_ship)
     usa_n = usa.read_filename_toc() or []
     usa_idx = {n.lower(): i for i, n in enumerate(usa_n)}
@@ -367,6 +521,13 @@ def audit_all(usa_ship: Path,
                 usa_blob = usa.read_entry(idx, fh)
                 issues.extend(_audit_region(ext, cat_path, usa_blob, st))
         status[ext] = st
+
+    # celfid.lix (single catalog, lives at translations/celfid.json)
+    celfid_cat = catalog_root / "celfid.json"
+    if celfid_cat.exists() and usa_file_afs is not None and usa_file_afs.exists():
+        st = ExtStatus()
+        issues.extend(_audit_celfid(celfid_cat, usa_file_afs, st))
+        status["celfid.lix"] = st
 
     return issues, status
 

@@ -29,6 +29,7 @@ from __future__ import annotations
 from ._common import CATALOG_DIR
 from .audit import ExtStatus, Issue, audit_all, format_status_table
 from .catalog import SUPPORTED_EXTS, extract_all
+from .celfid import extract_celfid_catalog, translated_celfid_bytes
 from .fpb import (build_fpb, extract_all_fpb, parse_fpb_raw, remap_windows,
                   synthesize_implicit_seq0, translated_fpb_bytes)
 from .region import (REGION_OVERLAY_EXTS, extract_all_region, find_text_regions,
@@ -44,4 +45,5 @@ __all__ = [
     "parse_slot_file", "build_slot_file", "split_slot",
     "find_text_regions",
     "audit_all", "format_status_table", "ExtStatus", "Issue",
+    "extract_celfid_catalog", "translated_celfid_bytes",
 ]

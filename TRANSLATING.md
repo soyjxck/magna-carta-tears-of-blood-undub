@@ -143,6 +143,30 @@ Dialog tables. The catalog has a `records` array; each entry is one dialog line 
 - **Wholesale rewrites are fine.** Each record is independent; rewriting every `en` value works exactly as expected. (Earlier versions used a diff-remap that collapsed under wholesale edits — that's gone.)
 - **Records that exist in USA but not KR/JP** (the 21/707 .fpb files with localization-branch deltas) get no `kr` or `jp` field on the unmatched record. You can still translate the `en`.
 
+### `celfid.lix` — startup bundle (independent file)
+
+A separate catalog at `translations/celfid.json`. This is *not* a SHIP.AFS file — it's the engine's startup bundle inside `FILE.AFS`, and it's where the engine actually reads **character display names** (Calintz, Reith, etc.) from. SHIP's `.cha` is *not* the source for the HUD/menu/dialog name display; celfid.lix is.
+
+It also holds item names, monster bestiary descriptions, combat-style descriptions, and assorted UI labels — many of which also exist in SHIP catalogs. We treat them independently: edit in both places to be safe (engine precedence between the two sources isn't fully mapped).
+
+```json
+{
+  "file": "celfid.lix",
+  "slots": [
+    { "marker": "ffffffff010000005802000001000000", "max_bytes": 101,
+      "en": "Reith", "kr": "리스", "jp": "リース" },
+    { "marker": "ffffffffffffffff3101000005000000", "max_bytes": 67,
+      "en": "A style that relies on super-quick strikes.",
+      "kr": "...", "jp": "..." }
+  ]
+}
+```
+
+- **Edit only `en`.** `marker` is the 16-byte structural fingerprint that locates the slot across regions; `max_bytes` is the slot's null-padded capacity. Both are read-only — touching them breaks the build. Validator catches edits.
+- **Hard cap = `max_bytes - 1`** (1 byte reserved for the null terminator). Validator reports it precisely on overflow.
+- ~615 slots total. ~99% have both KR and JP refs (cross-referenced via the marker — if the same 16 bytes appear in KR/JP celfid.lix, the string at that position is the source-language equivalent). The few without are USA-only or had non-unique markers.
+- Build path: when `translations/celfid.json` has any edited `en`, the build decompresses USA's celfid.lix → patches each edited slot in-place (cap-clamped, null-padded) → recompresses → repacks into a hybrid FILE.AFS → swaps that into the ISO. Skipped entirely when nothing's edited.
+
 ## Workflow
 
 1. **Extract** — `python3 patch.py translate-extract`

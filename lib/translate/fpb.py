@@ -106,6 +106,15 @@ def build_fpb(header16: bytes, windows: list[Window], data_section: bytes) -> by
     data section are clamped to fit. The header's first u32 ``count`` is
     rewritten to ``len(windows) + 1`` so the engine sees the correct
     record count (matters when the catalog was edited).
+
+    The header field at offset +0x0C is the **implicit seq=0 length** —
+    the engine reads bytes ``data[0:implicit_len]`` for record 0 instead
+    of using the windows table. Verified across all 652 .fpb files in
+    Magna Carta: every file has ``header[+0x0C] u32 LE == first explicit
+    window's offset``. We patch this field on rebuild so seq=0 reads the
+    correct slice; without the patch the engine reads the original
+    USA-sized window from our differently-sized data, bleeding adjacent
+    records into the seq=0 dialog box.
     """
     if len(header16) != 16:
         raise ValueError(f"header16 must be 16 bytes, got {len(header16)}")
@@ -118,9 +127,17 @@ def build_fpb(header16: bytes, windows: list[Window], data_section: bytes) -> by
         elif offset + length > data_len:
             length = data_len - offset
         table += struct.pack("<III", seq, offset, length)
+
+    # Patch the implicit seq=0 length to match the new layout. Equals the
+    # first explicit window's offset; 0 if no explicit windows exist.
+    implicit_seq0_len = windows[0][1] if windows else 0
+    header16 = (header16[:0x0C]
+                + struct.pack("<I", implicit_seq0_len)
+                + header16[0x10:])
+
     out = bytearray()
     out += struct.pack("<I", n)
-    out += header16[4:]            # 12 zero-padding bytes preserved verbatim
+    out += header16[4:]
     out += table
     out += struct.pack("<I", data_len)
     out += data_section

@@ -66,7 +66,9 @@ from ffmpeg import find_or_build_ffmpeg
 from iso import patch_iso
 from linear import build as build_linear
 from ship import build as build_ship
-from translate import extract_all, CATALOG_DIR, audit_all, format_status_table
+from translate import (extract_all, CATALOG_DIR, audit_all, format_status_table,
+                       extract_celfid_catalog, translated_celfid_bytes)
+from cri_afs import Afs, write_afs
 
 DEFAULT_USA_ISO = ROOT / "roms" / "Magna Carta - Tears of Blood (USA).iso"
 DEFAULT_SOURCE_ISOS = {
@@ -177,6 +179,30 @@ def cmd_build_iso(args: argparse.Namespace) -> int:
     replacements["/MUSIC.AFS"] = p["src_music"]
     replacements["/SHIP.AFS"] = p["ship_hybrid"]
 
+    # Phase 3b: if a celfid.lix translation catalog exists, rebuild FILE.AFS
+    # with the patched celfid.lix (character names, item names, etc.).
+    if tx_dir is not None and (tx_dir / "celfid.json").exists():
+        usa_file_afs = WORK / "usa" / "FILE.AFS"
+        new_celfid = translated_celfid_bytes(usa_file_afs,
+                                             tx_dir / "celfid.json")
+        if new_celfid is not None:
+            print(f"  Phase 3b: rebuilding FILE.AFS with patched celfid.lix")
+            afs = Afs.open(usa_file_afs)
+            names = afs.read_filename_toc()
+            md = afs.read_toc_metadata()
+            entries: list[tuple[str, bytes]] = []
+            with usa_file_afs.open("rb") as fh:
+                for i, name in enumerate(names):
+                    if name.lower() == "celfid.lix":
+                        entries.append((name, new_celfid))
+                    else:
+                        entries.append((name, afs.read_entry(i, fh)))
+            file_hybrid = BUILD / f"{args.source}_base" / "FILE.AFS"
+            file_hybrid.parent.mkdir(parents=True, exist_ok=True)
+            write_afs(file_hybrid, entries, toc_metadata=md)
+            replacements["/FILE.AFS"] = file_hybrid
+            print(f"    wrote {file_hybrid} ({file_hybrid.stat().st_size:,}B)")
+
     print(f"\n  applying {len(replacements)} swaps to ISO ...")
     in_place, relocated = patch_iso(args.usa_iso, p["patched_iso"], replacements)
     print(f"\nbuilt {p['patched_iso']} ({p['patched_iso'].stat().st_size:,} B)")
@@ -208,7 +234,8 @@ def cmd_dump_mkv(args: argparse.Namespace) -> int:
 
 
 def cmd_translate_extract(args: argparse.Namespace) -> int:
-    """Extract per-file translation catalogs from USA SHIP, with KR/JP refs."""
+    """Extract per-file translation catalogs from USA SHIP + celfid.lix in
+    USA FILE.AFS, with KR/JP refs."""
     usa = WORK / "usa" / "SHIP.AFS"
     kr  = WORK / "kr"  / "SHIP.AFS"
     jp  = WORK / "jp"  / "SHIP.AFS"
@@ -221,6 +248,23 @@ def cmd_translate_extract(args: argparse.Namespace) -> int:
     total = sum(counts.values())
     for ext, n in counts.items():
         print(f"  {ext}: {n} files -> translations/{ext.lstrip('.')}/")
+
+    # celfid.lix: independent catalog for character names + item/UI strings
+    # baked into the FILE.AFS startup bundle (the engine reads display names
+    # from here, not from SHIP.AFS .cha).
+    usa_file = WORK / "usa" / "FILE.AFS"
+    kr_file  = WORK / "kr"  / "FILE.AFS"
+    jp_file  = WORK / "jp"  / "FILE.AFS"
+    if usa_file.exists():
+        n_celfid = extract_celfid_catalog(
+            usa_file,
+            kr_file if kr_file.exists() else None,
+            jp_file if jp_file.exists() else None,
+            CATALOG_DIR / "celfid.json",
+        )
+        print(f"  celfid.lix: {n_celfid} slots -> translations/celfid.json")
+        total += 1
+
     print(f"\n  {total} catalog files total.")
     print(f"  edit *.json `en` fields, then `patch.py build-iso --translations`.")
     return 0
@@ -234,7 +278,9 @@ def cmd_translate_validate(args: argparse.Namespace) -> int:
         sys.exit("USA SHIP.AFS missing — run `patch.py setup` first")
     if not CATALOG_DIR.exists():
         sys.exit(f"{CATALOG_DIR} missing — run `patch.py translate-extract` first")
-    issues, _ = audit_all(usa, CATALOG_DIR)
+    usa_file = WORK / "usa" / "FILE.AFS"
+    issues, _ = audit_all(usa, CATALOG_DIR,
+                          usa_file_afs=usa_file if usa_file.exists() else None)
     n_err = sum(1 for i in issues if i.level == "error")
     n_warn = sum(1 for i in issues if i.level == "warn")
     if not issues:
@@ -253,7 +299,9 @@ def cmd_translate_status(args: argparse.Namespace) -> int:
         sys.exit("USA SHIP.AFS missing — run `patch.py setup` first")
     if not CATALOG_DIR.exists():
         sys.exit(f"{CATALOG_DIR} missing — run `patch.py translate-extract` first")
-    _, status = audit_all(usa, CATALOG_DIR)
+    usa_file = WORK / "usa" / "FILE.AFS"
+    _, status = audit_all(usa, CATALOG_DIR,
+                          usa_file_afs=usa_file if usa_file.exists() else None)
     if not status:
         print("  no catalogs found under translations/")
         return 0

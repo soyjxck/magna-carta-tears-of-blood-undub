@@ -64,19 +64,36 @@ def _first_chunk_path(blob: bytes) -> str:
 
 
 def _classify_lin(blob: bytes) -> str:
-    """Return UE2 asset class: 'Texture' / 'StaticMesh' / 'Map' / 'Anim' /
-    'EffScr' / 'Emitter' / 'Other'. Distinguishes the safe-to-overlay
-    visual assets (Texture, StaticMesh) from the cross-referencing ones."""
+    """Return UE2 asset class: 'Texture' / 'StaticMesh' / 'Mesh' / 'SkelMesh' /
+    'Map' / 'Anim' / 'Sound' / 'EffScr' / 'Emitter' / 'Other'.
+
+    The class is read from the leading "../<dir>/<id>.<ext>" path header in
+    the first decompressed chunk. Note the dev-team naming quirks:
+
+      - ``Anim/`` holds .anm files (regular keyframe animations, 1070 files)
+      - ``Animations/`` holds .ukx files (SkeletalMesh packages, 95 files)
+      - ``Mesh/`` holds .mes files (character/object meshes, 209 files)
+
+    Verified across all 4,098 USA .lin files: every one matches exactly one
+    of these classes. No "Other" outputs in practice unless the path header
+    is missing or malformed.
+    """
     p = _first_chunk_path(blob)
     pl = p.lower()
     if "/textures/" in pl or "\\textures\\" in pl:
         return "Texture"
     if "/staticmeshes/" in pl or "\\staticmeshes\\" in pl:
         return "StaticMesh"
-    if "/maps/" in pl or "\\maps\\" in pl:
-        return "Map"
+    if "/mesh/" in pl or "\\mesh\\" in pl:
+        return "Mesh"
+    if "/animations/" in pl or "\\animations\\" in pl:
+        return "SkelMesh"
     if "/anim/" in pl or "\\anim\\" in pl:
         return "Anim"
+    if "/sounds/" in pl or "\\sounds\\" in pl:
+        return "Sound"
+    if "/maps/" in pl or "\\maps\\" in pl:
+        return "Map"
     if "/effscr/" in pl or "\\effscr\\" in pl:
         return "EffScr"
     if "/emitter/" in pl or "\\emitter\\" in pl:

@@ -490,11 +490,44 @@ Ext counts also differ slightly between regions:
 
 All three regions: 4,099 entries (370 MB). 4,098 `.lin` files + 1 manifest at slot 0.
 
-`.lin` files hold the actual UE2 packages — Maps (`.unr`), Textures (`.utx`), StaticMeshes (`.usx`), Animations (`.anm`), Skeletal anims (`.ukx`), EffectScripts (`.efs`), Emitters (`.Emi`), Sounds (`.uax`) — that the engine streams in/out as the player crosses scene boundaries via `FArchiveFileReaderLinear` (string visible in the boot ELF). Each `.lin` file contains exactly one UE2 package.
+`.lin` files hold the actual UE2 packages that the engine streams in/out as the player crosses scene boundaries via `FArchiveFileReaderLinear` (string visible in the boot ELF). **Each `.lin` is exactly one UE2 package, of one specific type, identified by the path header at the start of the decompressed buffer.**
+
+### Class breakdown (USA, all 4,098 .lin files)
+
+| Class | Count | Total | Avg | What's inside |
+|---|---:|---:|---:|---|
+| `.utx` Texture | 1,589 | ~190 MB | ~120 KB | Character portraits, UI graphics, font glyphs, environmental textures |
+| `.anm` Animation | 1,070 | ~6 MB | ~6 KB | Keyframe animation data (idle loops, movement curves) |
+| `.uax` Audio | 512 | ~50 MB | ~100 KB | Sound effects + voice clips |
+| `.efs` EffScr | 281 | ~14 MB | ~50 KB | Effect scripts (combat hits, magic visuals) |
+| `.usx` StaticMesh | 255 | ~14 MB | ~55 KB | Environmental objects, signs, props |
+| `.mes` Mesh | 209 | ~30 MB | ~145 KB | Character/object 3D meshes (verts, UVs, materials) |
+| `.ukx` SkelMesh | 95 | ~20 MB | ~210 KB | Animated character skeletons + bind poses |
+| `.unr` Map | 86 | ~25 MB | ~290 KB | Level / scene files |
+| `.Emi` Emitter | 1 | ~1 MB | — | Particle effects bundle |
 
 Of the 4,099 entries, **3,993 are byte-identical** between USA and source regions (sample of 200: 200 / 200 identical). Only **31 differ** — and those 31 are where region-specific UI/HUD texture pixels live. See [The 31 region-specific .lin files](#the-31-region-specific-lin-files).
 
 In addition, **74 `.lin` files are USA-only** (no equivalent in KR/JP). These are all `Sounds/.uax` packages — extra English voice content recorded by ATLUS USA that doesn't exist in the source regions. We don't pull these into the hybrid build; they'd reference USA voice IDs that aren't in source-region MUSIC.AFS.
+
+### Mental model: package, not asset
+
+A `.lin` is a *package container*, not a single asset. The package can hold **multiple internal exports of the same type**, and references **other packages' exports** by path.
+
+Example: `00001035.lin` is one `.utx` Texture package containing two texture exports (`c001_calintz_face_index`, `c001_calintz_body_index`) plus the shared UE2 Texture class properties (`USize`, `VSize`, `Palette`, `MipZero`, `UClamp`, `VClamp`, etc.).
+
+Example: `00001076.lin` is one `.mes` Mesh package containing one character mesh — bones (`Bip01`, `Bip01 Neck`, `Bip01 L UpperArm`, `Bip01 Spine1`...), face morph targets (`f_lip_up_midR`, `f_lip_dw_midL`), mesh variants (`eclipse`, `eclipse2`, `eclipse9`). It *references* texture exports from a separate `.utx` `.lin` — those refs show up as `../Textures/...` paths in the import table.
+
+**Why this matters for the hybrid undub**: when the engine loads a character into a scene, it streams in *several* `.lin` files together — Mesh + SkeletalMesh + Animation + Texture — each being one package. Our overlay rules (`USA_OVERLAY_CLASSES = ("Texture", "StaticMesh")`) operate per-package: USA's bytes for all `.utx` and `.usx` packages, source-region bytes for `.mes`/`.ukx`/`.anm`/`.uax`/`.efs`/`.unr`/`.Emi`. Region differences (the 31 differing files) cluster in `.utx` Texture packages because that's where pixel-baked UI text lives.
+
+### Practical implication: where displayed text comes from
+
+Different on-screen text routes to different file types:
+- **Static UI labels** (menu tabs "Party"/"Item", title-screen buttons) → pixel-baked into `.utx` Texture packages (auto-overlaid USA)
+- **Character names in HUD/dialog** → pixel-baked into character portrait `.utx` packages (auto-overlaid USA — that's why our SHIP `.cha` Khanzada edit didn't change them)
+- **Free-form dialog text** → SHIP `.fpb` (catalog-editable)
+- **Item/ability descriptions** → SHIP `.itm` / `.abi` regions (catalog-editable)
+- **Effect/combat visuals** → `.efs` EffScr packages (one of which can reference a per-character glow texture by name, e.g. `greyglow_for_calintz` in `00011215.efs`)
 
 ---
 
