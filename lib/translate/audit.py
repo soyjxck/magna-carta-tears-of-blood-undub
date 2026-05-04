@@ -370,63 +370,51 @@ def _audit_celfid(catalog_path: Path, usa_file_afs: Path,
                       f"can't read USA celfid.lix: {e}")]
 
     cat_slots = cat.get("slots", [])
+    cat_groups = cat.get("linked_groups", [])
     file_edited = False
 
-    for k, rec in enumerate(cat_slots):
-        loc = f"slots[{k}]"
-        marker_hex = rec.get("marker", "")
-        max_bytes = rec.get("max_bytes")
-        cat_en = rec.get("en", "")
+    def _check_one(loc: str, marker_hex, max_bytes, en_for_slot, usa_en):
+        """Run the per-slot validation common to both stand-alones and
+        group members. Returns the cap-violation flag; updates status."""
+        nonlocal file_edited
         if not isinstance(marker_hex, str) or not isinstance(max_bytes, int):
             issues.append(Issue(catalog_path, loc, "marker/max_bytes",
                                 "error",
                                 "missing or wrong-type marker / max_bytes "
                                 "(don't remove these — re-extract if needed)"))
             status.total_records += 1
-            continue
+            return
         try:
             marker = bytes.fromhex(marker_hex)
         except ValueError:
             issues.append(Issue(catalog_path, loc, "marker", "error",
                                 "marker is not valid hex"))
             status.total_records += 1
-            continue
-
-        # Locate the slot in USA — marker must still resolve uniquely.
-        # Multiple matches mean the marker can't safely identify ONE slot
-        # (e.g. someone edited the marker to all zeros, which happens to
-        # match many positions); patcher would land on the wrong one.
+            return
         n_matches = decomp.count(marker)
         if n_matches == 0:
             issues.append(Issue(catalog_path, loc, "marker", "error",
                                 "marker not found in USA celfid.lix "
                                 "(re-extract — USA bytes drifted?)"))
             status.total_records += 1
-            continue
+            return
         if n_matches > 1:
             issues.append(Issue(catalog_path, loc, "marker", "error",
                                 f"marker matches {n_matches} positions in USA "
                                 f"celfid.lix — not unique, patcher would land "
                                 f"on the wrong slot. Re-extract."))
             status.total_records += 1
-            continue
-        idx = decomp.find(marker)
-        slot_start = idx + len(marker)
-        usa_en, _ = _string_at(decomp, slot_start, encoding="latin-1")
-
-        if not isinstance(cat_en, str):
+            return
+        if not isinstance(en_for_slot, str):
             issues.append(Issue(catalog_path, loc, "en", "error",
-                                f"expected string, got {type(cat_en).__name__}"))
+                                f"expected string, got {type(en_for_slot).__name__}"))
             status.total_records += 1
-            continue
-
-        encoded, err = _try_encode_latin1(cat_en)
+            return
+        encoded, err = _try_encode_latin1(en_for_slot)
         if err is not None:
             issues.append(Issue(catalog_path, loc, "en", "error", err))
             status.total_records += 1
-            continue
-
-        # Cap: max_bytes - 1 (one byte reserved for null terminator)
+            return
         cap = max_bytes - 1
         if len(encoded) > cap:
             issues.append(Issue(
@@ -435,14 +423,43 @@ def _audit_celfid(catalog_path: Path, usa_file_afs: Path,
                 f"(slot's null-padded capacity is {max_bytes}; "
                 f"1 byte reserved for terminator)"
             ))
-
-        if cat_en != usa_en:
-            warn = _token_drop_warning(usa_en, cat_en)
+        if en_for_slot != usa_en:
+            warn = _token_drop_warning(usa_en, en_for_slot)
             if warn is not None:
                 issues.append(Issue(catalog_path, loc, "en", "warn", warn))
             status.edited_records += 1
             file_edited = True
         status.total_records += 1
+
+    # Stand-alone slots
+    for k, rec in enumerate(cat_slots):
+        marker = bytes.fromhex(rec.get("marker", "00")) if rec.get("marker") else b""
+        idx = decomp.find(marker) if marker else -1
+        usa_en = _string_at(decomp, idx + len(marker), encoding="latin-1")[0] if idx >= 0 else ""
+        _check_one(f"slots[{k}]", rec.get("marker"), rec.get("max_bytes"),
+                   rec.get("en", ""), usa_en)
+
+    # Linked groups: each member's en is template.format(base=group_base),
+    # so we validate against that derived value, not a per-slot en field.
+    for gi, grp in enumerate(cat_groups):
+        new_base = grp.get("base", "")
+        for k, member in enumerate(grp.get("slots", [])):
+            tmpl = member.get("template", "")
+            try:
+                derived_en = tmpl.format(base=new_base)
+            except (KeyError, IndexError):
+                issues.append(Issue(catalog_path,
+                                    f"linked_groups[{gi}].slots[{k}]", "template",
+                                    "error",
+                                    f"template {tmpl!r} can't apply to base {new_base!r}"))
+                status.total_records += 1
+                continue
+            marker = bytes.fromhex(member.get("marker", "00")) if member.get("marker") else b""
+            idx = decomp.find(marker) if marker else -1
+            usa_en = _string_at(decomp, idx + len(marker), encoding="latin-1")[0] if idx >= 0 else ""
+            _check_one(f"linked_groups[{gi}][{grp.get('base')!r}].slots[{k}]",
+                       member.get("marker"), member.get("max_bytes"),
+                       derived_en, usa_en)
 
     if file_edited:
         status.files_with_edits += 1

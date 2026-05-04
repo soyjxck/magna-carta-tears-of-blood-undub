@@ -157,11 +157,16 @@ def cmd_build_iso(args: argparse.Namespace) -> int:
         print(f"  Phase 1: no cutscenes built — run `patch.py cutscenes --source {args.source}` first")
 
     # Phase 3: build hybrid SHIP.AFS + hybrid LINEAR.AFS, then queue the AFS swaps
-    tx_dir = ROOT / "translations" if getattr(args, "translations", False) else None
+    tx_arg = getattr(args, "translations", None)
+    if tx_arg is None:
+        tx_dir = None
+    else:
+        # --translations (no value) → translations/   |  --translations PATH → PATH
+        tx_dir = ROOT / tx_arg if not Path(tx_arg).is_absolute() else Path(tx_arg)
     if tx_dir is not None:
         if not tx_dir.exists():
-            sys.exit(f"--translations passed but {tx_dir} doesn't exist — "
-                     f"run `patch.py translate-extract` first")
+            sys.exit(f"--translations {tx_dir} doesn't exist — "
+                     f"run `patch.py translate-extract --out {tx_dir.name}` first")
         print(f"  Phase 3: building {args.source}-base hybrid SHIP.AFS with USA text overlays + translations from {tx_dir}")
     else:
         print(f"  Phase 3: building {args.source}-base hybrid SHIP.AFS with USA text overlays")
@@ -235,7 +240,11 @@ def cmd_dump_mkv(args: argparse.Namespace) -> int:
 
 def cmd_translate_extract(args: argparse.Namespace) -> int:
     """Extract per-file translation catalogs from USA SHIP + celfid.lix in
-    USA FILE.AFS, with KR/JP refs."""
+    USA FILE.AFS, with KR/JP refs. Writes to ``translations/`` by default;
+    pass ``--out`` to use a different directory (e.g. ``translations-deepl``)."""
+    out_arg = getattr(args, "out", None) or "translations"
+    out_dir = ROOT / out_arg if not Path(out_arg).is_absolute() else Path(out_arg)
+
     usa = WORK / "usa" / "SHIP.AFS"
     kr  = WORK / "kr"  / "SHIP.AFS"
     jp  = WORK / "jp"  / "SHIP.AFS"
@@ -244,10 +253,10 @@ def cmd_translate_extract(args: argparse.Namespace) -> int:
     counts = extract_all(usa,
                          kr if kr.exists() else None,
                          jp if jp.exists() else None,
-                         CATALOG_DIR)
+                         out_dir)
     total = sum(counts.values())
     for ext, n in counts.items():
-        print(f"  {ext}: {n} files -> translations/{ext.lstrip('.')}/")
+        print(f"  {ext}: {n} files -> {out_dir.name}/{ext.lstrip('.')}/")
 
     # celfid.lix: independent catalog for character names + item/UI strings
     # baked into the FILE.AFS startup bundle (the engine reads display names
@@ -260,26 +269,29 @@ def cmd_translate_extract(args: argparse.Namespace) -> int:
             usa_file,
             kr_file if kr_file.exists() else None,
             jp_file if jp_file.exists() else None,
-            CATALOG_DIR / "celfid.json",
+            out_dir / "celfid.json",
         )
-        print(f"  celfid.lix: {n_celfid} slots -> translations/celfid.json")
+        print(f"  celfid.lix: {n_celfid} slots -> {out_dir.name}/celfid.json")
         total += 1
 
-    print(f"\n  {total} catalog files total.")
-    print(f"  edit *.json `en` fields, then `patch.py build-iso --translations`.")
+    print(f"\n  {total} catalog files total in {out_dir}/.")
+    tag = f" --translations {out_dir.name}" if out_dir.name != "translations" else " --translations"
+    print(f"  edit *.json `en` fields, then `patch.py build-iso{tag}`.")
     return 0
 
 
 def cmd_translate_validate(args: argparse.Namespace) -> int:
-    """Audit every JSON catalog under translations/. Prints issues with
-    file:record precision and exits non-zero if any errors are found."""
+    """Audit every JSON catalog under translations/ (or a custom dir).
+    Prints issues with file:record precision and exits non-zero on errors."""
     usa = WORK / "usa" / "SHIP.AFS"
     if not usa.exists():
         sys.exit("USA SHIP.AFS missing — run `patch.py setup` first")
-    if not CATALOG_DIR.exists():
-        sys.exit(f"{CATALOG_DIR} missing — run `patch.py translate-extract` first")
+    cat_arg = getattr(args, "dir", None) or "translations"
+    cat_dir = ROOT / cat_arg if not Path(cat_arg).is_absolute() else Path(cat_arg)
+    if not cat_dir.exists():
+        sys.exit(f"{cat_dir} missing — run `patch.py translate-extract --out {cat_dir.name}` first")
     usa_file = WORK / "usa" / "FILE.AFS"
-    issues, _ = audit_all(usa, CATALOG_DIR,
+    issues, _ = audit_all(usa, cat_dir,
                           usa_file_afs=usa_file if usa_file.exists() else None)
     n_err = sum(1 for i in issues if i.level == "error")
     n_warn = sum(1 for i in issues if i.level == "warn")
@@ -297,10 +309,12 @@ def cmd_translate_status(args: argparse.Namespace) -> int:
     usa = WORK / "usa" / "SHIP.AFS"
     if not usa.exists():
         sys.exit("USA SHIP.AFS missing — run `patch.py setup` first")
-    if not CATALOG_DIR.exists():
-        sys.exit(f"{CATALOG_DIR} missing — run `patch.py translate-extract` first")
+    cat_arg = getattr(args, "dir", None) or "translations"
+    cat_dir = ROOT / cat_arg if not Path(cat_arg).is_absolute() else Path(cat_arg)
+    if not cat_dir.exists():
+        sys.exit(f"{cat_dir} missing — run `patch.py translate-extract --out {cat_dir.name}` first")
     usa_file = WORK / "usa" / "FILE.AFS"
-    _, status = audit_all(usa, CATALOG_DIR,
+    _, status = audit_all(usa, cat_dir,
                           usa_file_afs=usa_file if usa_file.exists() else None)
     if not status:
         print("  no catalogs found under translations/")
@@ -332,8 +346,10 @@ def main() -> int:
     cs.set_defaults(func=cmd_cutscenes)
 
     bi = sub.add_parser("build-iso", help="patch USA ISO with cutscenes + AFS swaps")
-    bi.add_argument("--translations", action="store_true",
-                    help="apply edits from translations/<ext>/*.json (opt-in)")
+    bi.add_argument("--translations", nargs="?", const="translations", default=None,
+                    metavar="DIR",
+                    help="apply edits from <DIR>/*.json. With no value: 'translations/'. "
+                         "Pass a path to use an alternate catalog (e.g. 'translations-deepl').")
     bi.add_argument("--no-hardsub", action="store_true",
                     help="use raw (no-hardsub) cutscenes; ISO output goes to ...-raw.iso")
     bi.set_defaults(func=cmd_build_iso)
@@ -344,21 +360,28 @@ def main() -> int:
     xd.set_defaults(func=cmd_xdelta)
 
     f = sub.add_parser("full", help="setup + cutscenes + build-iso + xdelta")
-    f.add_argument("--translations", action="store_true",
-                   help="apply edits from translations/<ext>/*.json (opt-in)")
+    f.add_argument("--translations", nargs="?", const="translations", default=None,
+                   metavar="DIR",
+                   help="apply edits from <DIR>/*.json (default: 'translations')")
     f.add_argument("--no-hardsub", action="store_true",
                    help="propagated to cutscenes/build-iso/xdelta (raw variant)")
     f.set_defaults(func=cmd_full)
-    sub.add_parser("translate-extract",
-                   help="dump per-file translation catalogs to translations/<ext>/ for editing"
-                   ).set_defaults(func=cmd_translate_extract)
-    sub.add_parser("translate-validate",
-                   help="audit translations/ JSON catalogs for cap violations, "
-                        "latin-1 errors, and edited read-only fields"
-                   ).set_defaults(func=cmd_translate_validate)
-    sub.add_parser("translate-status",
-                   help="show per-extension translation progress (edited vs untouched)"
-                   ).set_defaults(func=cmd_translate_status)
+    te = sub.add_parser("translate-extract",
+                        help="dump per-file translation catalogs to <DIR>/<ext>/ for editing")
+    te.add_argument("--out", default="translations", metavar="DIR",
+                    help="catalog output directory (default: 'translations')")
+    te.set_defaults(func=cmd_translate_extract)
+    tv = sub.add_parser("translate-validate",
+                        help="audit JSON catalogs for cap violations, "
+                             "latin-1 errors, and edited read-only fields")
+    tv.add_argument("--dir", default="translations", metavar="DIR",
+                    help="catalog directory to validate (default: 'translations')")
+    tv.set_defaults(func=cmd_translate_validate)
+    ts = sub.add_parser("translate-status",
+                        help="show per-extension translation progress (edited vs untouched)")
+    ts.add_argument("--dir", default="translations", metavar="DIR",
+                    help="catalog directory (default: 'translations')")
+    ts.set_defaults(func=cmd_translate_status)
     dm = sub.add_parser("dump-mkv",
                         help="dump KR/JP cutscenes as MKV (optional --hardsub)")
     dm.add_argument("--regions", default="kr,jp",

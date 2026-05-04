@@ -12,6 +12,21 @@ python3 patch.py translate-status         # see how much is done
 python3 patch.py build-iso --translations # apply edits and rebuild the ISO
 ```
 
+### Side-by-side catalogs
+
+The catalog dir is configurable. Keep multiple translations side-by-side and pick one at build time:
+
+```bash
+# Extract a separate catalog for, e.g., a DeepL-machine-translated pass
+python3 patch.py translate-extract --out translations-deepl
+# (run a translation tool against translations-deepl/...)
+python3 patch.py translate-validate --dir translations-deepl
+python3 patch.py build-iso --translations translations-deepl   # build with the deepl catalog
+python3 patch.py build-iso --translations                      # default: 'translations/'
+```
+
+Any directory matching `translations*` is gitignored — they're derived from your own ISOs.
+
 ## What you can edit
 
 Each catalog entry has reference text in three languages so you can pick whichever source you prefer:
@@ -162,10 +177,38 @@ It also holds item names, monster bestiary descriptions, combat-style descriptio
 }
 ```
 
-- **Edit only `en`.** `marker` is the 16-byte structural fingerprint that locates the slot across regions; `max_bytes` is the slot's null-padded capacity. Both are read-only — touching them breaks the build. Validator catches edits.
+- **Edit only `en` (stand-alone slots) or `base` (linked groups).** `marker` is the 16-byte structural fingerprint that locates the slot across regions; `max_bytes` is the slot's null-padded capacity. Both are read-only — touching them breaks the build. Validator catches edits.
 - **Hard cap = `max_bytes - 1`** (1 byte reserved for the null terminator). Validator reports it precisely on overflow.
-- ~615 slots total. ~99% have both KR and JP refs (cross-referenced via the marker — if the same 16 bytes appear in KR/JP celfid.lix, the string at that position is the source-language equivalent). The few without are USA-only or had non-unique markers.
-- Build path: when `translations/celfid.json` has any edited `en`, the build decompresses USA's celfid.lix → patches each edited slot in-place (cap-clamped, null-padded) → recompresses → repacks into a hybrid FILE.AFS → swaps that into the ISO. Skipped entirely when nothing's edited.
+- ~615 slots total. ~99% have both KR and JP refs (cross-referenced via the marker — if the same 16 bytes appear in KR/JP celfid.lix, the string at that position is the source-language equivalent).
+- Build path: when `translations/celfid.json` has any edit, the build decompresses USA's celfid.lix → patches each affected slot in-place (cap-clamped, null-padded) → recompresses → repacks into a hybrid FILE.AFS → swaps that into the ISO. Skipped entirely when nothing's edited.
+
+**Linked groups** — for cross-referenced slots the engine validates by exact string match. Example: in Magna Carta, several slots store `Roxy` (the character) and one stores `T.Roxy` (the title). The engine looks up `"T." + character_name` at boot — if the title slot says `T.Khan` but the name slot still says `Roxy`, the engine crashes.
+
+The catalog detects these clusters automatically and groups them:
+
+```json
+{
+  "linked_groups": [
+    {
+      "base": "Roxy",
+      "slots": [
+        { "marker": "...", "max_bytes": 32,  "template": "{base}" },
+        { "marker": "...", "max_bytes": 32,  "template": "{base}" },
+        { "marker": "...", "max_bytes": 102, "template": "T.{base}" }
+      ]
+    }
+  ]
+}
+```
+
+Edit the `base` field once. The build runs `template.format(base=new_base)` for every member to cascade the rename. So changing `"Roxy"` → `"Khan"` automatically produces:
+
+- `{base}` slots → `Khan`
+- `T.{base}` slot → `T.Khan`
+
+All members stay consistent. Cap is enforced per-slot after the cascade; validator flags if any cascaded result overflows.
+
+Common templates seen across celfid.lix linked groups: `"{base}"`, `"T.{base}"`, `"High {base}"`, `"Yason {base}"`, `"Superb {base}"`, `"{base}'s Ring"`, `"{base} Bone"`, `"{base} Feather"`, `"{base} Robe"`. ~18 groups covering ~67 slots; the remaining ~548 slots are stand-alone leaves.
 
 ## Workflow
 

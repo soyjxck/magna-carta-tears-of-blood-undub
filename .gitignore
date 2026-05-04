@@ -22,9 +22,10 @@ lib/experiments/
 docs/
 
 # Translation catalogs are derived from a user's own ISOs by
-# `patch.py translate-extract`.
+# `patch.py translate-extract`. Multiple side-by-side catalogs allowed
+# (e.g. translations-deepl, translations-experiment) — all gitignored.
 translations/
+translations-*/
 
 # Local-only — incomplete notes / one-off rebuild backups.
-translations-analysis/
 build_old/
