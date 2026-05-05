@@ -219,6 +219,42 @@ def _detect_linked_groups(slots: list[dict]) -> tuple[list[dict], list[dict]]:
             in_group.add(i)
         groups.append(group)
 
+    # Pass 2: catch identical-string duplicates that the substring pass missed.
+    # Pure duplicates (e.g. 'Reith' appearing as the full en in 3 different
+    # slots, never as a substring) form a same-template group with all
+    # members templated as "{base}". Editing the base renames every
+    # duplicate together so cross-references stay consistent.
+    by_text: dict[str, list[int]] = {}
+    for i, s in enumerate(slots):
+        if i in in_group:
+            continue
+        if not s.get("en") or len(s["en"]) < 4:
+            continue
+        if not s["en"][0].isupper():
+            continue
+        if any(c in s["en"] for c in '.?!,;:'):
+            continue
+        by_text.setdefault(s["en"], []).append(i)
+
+    for text, indices in by_text.items():
+        if len(indices) < 2:
+            continue
+        group = {"base": text, "slots": []}
+        for i in indices:
+            t = slots[i]
+            entry = {
+                "marker": t["marker"],
+                "max_bytes": t["max_bytes"],
+                "template": "{base}",
+            }
+            if "kr" in t:
+                entry["kr"] = t["kr"]
+            if "jp" in t:
+                entry["jp"] = t["jp"]
+            group["slots"].append(entry)
+            in_group.add(i)
+        groups.append(group)
+
     leaves = [slots[i] for i in range(len(slots)) if i not in in_group]
     return groups, leaves
 
@@ -379,6 +415,24 @@ def translated_celfid_bytes(usa_file_afs: Path,
             new_en = member["template"].format(base=new_base)
             if _patch_slot(out, decomp, member["marker"],
                            int(member["max_bytes"]), new_en):
+                any_edit = True
+
+        # Additionally byte-replace any remaining word-boundary occurrences of
+        # the old base across the whole celfid.lix — catches UE2 name table
+        # entries (`C_Calintz`, `Calintz_PartyData`, etc.) and other
+        # non-slot-shaped references the engine cross-validates at boot.
+        # Only safe when new_base has the same byte length as usa_base, since
+        # name-table entries have fixed length-prefix bytes that would need
+        # updating otherwise.
+        if (usa_base and new_base and len(usa_base) == len(new_base)
+                and all(c < 0x80 for c in new_base.encode("latin-1", errors="replace"))):
+            old_b = usa_base.encode("latin-1")
+            new_b = new_base.encode("latin-1")
+            # Word-boundary replace: not preceded/followed by an alphanumeric
+            pat = re.compile(rb'(?<![A-Za-z0-9])' + re.escape(old_b) + rb'(?![A-Za-z0-9])')
+            new_bytes = pat.sub(new_b, bytes(out))
+            if new_bytes != bytes(out):
+                out = bytearray(new_bytes)
                 any_edit = True
 
     if not any_edit:

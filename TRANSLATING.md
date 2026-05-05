@@ -208,7 +208,14 @@ Edit the `base` field once. The build runs `template.format(base=new_base)` for 
 
 All members stay consistent. Cap is enforced per-slot after the cascade; validator flags if any cascaded result overflows.
 
-Common templates seen across celfid.lix linked groups: `"{base}"`, `"T.{base}"`, `"High {base}"`, `"Yason {base}"`, `"Superb {base}"`, `"{base}'s Ring"`, `"{base} Bone"`, `"{base} Feather"`, `"{base} Robe"`. ~18 groups covering ~67 slots; the remaining ~548 slots are stand-alone leaves.
+Common templates seen across celfid.lix linked groups: `"{base}"`, `"T.{base}"`, `"High {base}"`, `"Yason {base}"`, `"Superb {base}"`, `"{base}'s Ring"`, `"{base} Bone"`, `"{base} Feather"`, `"{base} Robe"`. Two kinds of group are detected automatically:
+
+  * **Substring groups**: e.g. `Roxy` appears as standalone in some slots and as `T.Roxy` in another → grouped, with templates `"{base}"` and `"T.{base}"`.
+  * **Pure-duplicate groups**: e.g. `Reith` appears as the full `en` in 8 different slots (no template variation, just repeated). All 8 grouped under a single `base`.
+
+In total ~67 groups covering ~242 slots; the remaining ~373 slots are stand-alone leaves.
+
+**Same-length renames trigger an additional global byte-replace.** When the new `base` is the same byte length as the old one, the build also runs a word-boundary byte-replace across the whole celfid.lix to catch UE2 name-table entries (like `C_Calintz` or `CalintzPartyData`) that aren't in our slot pattern but reference the same name. Different-length renames (e.g. `Vestment → Outfits`, 8 → 7 chars) only cascade through the catalogued slots — the size-fixed name-table entries can't be safely rewritten in-place. So if you want a clean rename, pick a new name with the same byte length as the original.
 
 ## Workflow
 
