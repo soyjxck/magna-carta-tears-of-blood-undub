@@ -15,12 +15,15 @@ end of the original ISO.
 
 A small allowlist (`KEEP_USA_CUTSCENES`) names cutscenes where USA's
 original SFD bytes are preserved in place rather than re-encoded with
-source-region content; these are silent transitions where the
-region-specific bytes don't change anything visible/audible.
+source-region content; these carry baked-in English scrolling text we
+want to reuse verbatim in the undub (keeping USA gives us the English
+text for free and saves a relocation slot).
 """
 from __future__ import annotations
 
 import concurrent.futures as cf
+import hashlib
+import json
 import subprocess
 import sys
 import tempfile
@@ -39,12 +42,13 @@ from ffmpeg import find_or_build_ffmpeg
 DEFAULT_VIDEO_KBPS = 5500
 
 # Cutscenes where we keep USA's original SFD instead of re-encoding from
-# source-region bytes. These are silent / no-dialog transitions where
-# the source-region byte differences are inaudible/invisible — keeping
-# USA preserves the ISO bytes exactly and saves a relocation slot.
+# source-region bytes. These carry baked-in English scrolling text we
+# want to reuse verbatim in the undub — keeping USA preserves that
+# English text exactly, keeps the ISO bytes intact, and saves a
+# relocation slot.
 KEEP_USA_CUTSCENES = frozenset({
-    "180101",  # MOVIE18 — silent transition (96.08s, all regions match)
-    "991804",  # MOVIE99 — silent transition (41.63s, all regions match)
+    "180101",  # MOVIE18 — English scrolling text (96.08s)
+    "991804",  # MOVIE99 — English scrolling text (41.63s)
 })
 
 SUB_DIR_FOR = {"kr": ROOT / "subs" / "korean",
@@ -62,6 +66,25 @@ def _has_dialogue(ass: Path | None) -> bool:
     if ass is None or not ass.exists():
         return False
     return "Dialogue:" in ass.read_text()
+
+
+def _cache_stamp(job: "CutsceneJob", hardsub: bool) -> dict:
+    """Inputs that determine the cached SFD. Cached output is reused only
+    when its sidecar stamp equals this dict — covers added/removed/edited
+    `.ass`, source SFD changes, and hardsub flag flips."""
+    ass_info = None
+    if job.has_subs:
+        ass_info = {
+            "size": job.ass.stat().st_size,
+            "sha256": hashlib.sha256(job.ass.read_bytes()).hexdigest(),
+        }
+    return {
+        "version": 1,
+        "src_size": job.src_size,
+        "src_mtime": int(job.src_sfd.stat().st_mtime),
+        "hardsub": bool(hardsub),
+        "ass": ass_info,
+    }
 
 
 def _ffprobe_duration(path: Path) -> float:
@@ -222,11 +245,20 @@ def run_all(work_dir: Path = ROOT / "build" / "cutscenes-kr",
                 print(f"  [skip] {job.rel}  ({reason})")
             continue
         target = work_dir / job.name / f"{job.name}_undub.SFD"
-        if target.exists():
+        stamp_path = work_dir / job.name / f"{job.name}_undub.stamp.json"
+        expected_stamp = _cache_stamp(job, hardsub=hardsub)
+        if target.exists() and stamp_path.exists():
+            try:
+                cached_stamp = json.loads(stamp_path.read_text())
+            except Exception:
+                cached_stamp = None
+            if cached_stamp == expected_stamp:
+                if verbose:
+                    print(f"  [keep] {job.rel}  -> {target} ({target.stat().st_size:,} B)")
+                out["/" + job.rel] = target
+                continue
             if verbose:
-                print(f"  [keep] {job.rel}  -> {target} ({target.stat().st_size:,} B)")
-            out["/" + job.rel] = target
-            continue
+                print(f"  [stale] {job.rel}  inputs changed, rebuilding")
         if verbose:
             subs_tag = "Y" if wants_subs else "n"
             print(f"  [build] {job.rel}  USA={job.usa_size:,}  src={job.src_size:,}  "
@@ -234,6 +266,7 @@ def run_all(work_dir: Path = ROOT / "build" / "cutscenes-kr",
         try:
             out["/" + job.rel] = build_cutscene(job, work_dir, ffmpeg,
                                                 hardsub=hardsub)
+            stamp_path.write_text(json.dumps(expected_stamp, indent=2))
         except Exception as e:
             print(f"    ! failed: {e}")
     return out
