@@ -37,7 +37,7 @@ Pre-built patch. No build tools needed.
 
 **Requirements**: USA ISO + [DeltaPatcher](https://github.com/marco-calautti/DeltaPatcher/releases)
 
-1. Download whichever you want from [Releases](https://github.com/soyjxck/magna-carta-undub/releases/latest):
+1. Download whichever you want from [Releases](https://github.com/soyjxck/magna-carta-tears-of-blood-undub/releases/latest):
    - `magna-carta-tears-of-blood-undub-kr.xdelta` (Korean voice)
    - `magna-carta-tears-of-blood-undub-jp.xdelta` (Japanese voice)
 2. Open DeltaPatcher
@@ -57,8 +57,8 @@ Build from both ISOs. Auto-compiles ffmpeg with subtitle support on first run.
 **Requirements**: Python 3.11+, USA ISO, source-region ISO, `7z`, `xdelta3`
 
 ```bash
-git clone https://github.com/soyjxck/magna-carta-undub.git
-cd magna-carta-undub
+git clone https://github.com/soyjxck/magna-carta-tears-of-blood-undub.git
+cd magna-carta-tears-of-blood-undub
 mkdir -p roms
 # place ISOs in roms/:
 #   roms/Magna Carta - Tears of Blood (USA).iso         (always required)
@@ -83,7 +83,7 @@ python3 patch.py --source kr xdelta      # build/magna-carta-tears-of-blood-undu
 # (replace --source kr with --source jp for the Japanese variant)
 ```
 
-The `subs/korean/` and `subs/japanese/` directories ship with the English `.ass` subtitle files used for cutscene burn-in. They're committed to the repo; rebuilding from scratch doesn't re-run any transcription.
+The `subs/korean/` directory ships the English `.ass` subtitle files burned into the KR cutscenes (`subs/japanese/` is a work in progress). They're committed to the repo; rebuilding from scratch doesn't re-run any transcription.
 
 ### Option 3 — Re-translate with custom English  *(alpha)*
 
@@ -133,23 +133,24 @@ Full reverse-engineering record in [TECHNICAL.md](TECHNICAL.md).
 patch.py                  # CLI — setup / cutscenes / build-iso / xdelta / full
                           #       translate-extract / dump-mkv
 lib/
-  afs.py                  # CRI AFS reader + writer
   iso.py                  # ISO9660 patcher (in-place + relocation)
   ship.py                 # canonical hybrid SHIP.AFS builder
   linear.py               # canonical hybrid LINEAR.AFS builder
   cutscenes.py            # demux + re-encode + mux pipeline for SFDs + MKV dump
   ffmpeg.py               # ffmpeg+libass auto-build
   translate/              # retranslation pipeline (per-format parsers)
-    fpb.py                #   .fpb windowed-pool dialog
+    fpb.py                #   .fpb per-record dialog tables
     slot.py               #   fixed-stride slot files (.cht, .odd, .gft, ...)
     region.py             #   region-overlay files (.pod, .tui, .itm, ...)
+    celfid.py             #   celfid.lix startup-bundle names + items
     catalog.py            #   extract_all orchestrator
+                          # (CRI AFS read/write: cri-afs PyPI package)
 roms/                     # place both ISOs here (gitignored)
 work/                     # extracted ISO trees (gitignored)
 build/                    # output ISO + xdelta + cutscenes + MKV dumps (gitignored)
 subs/
-  korean/                 # 46 .ass files used when --source kr
-  japanese/               # 46 .ass files used when --source jp
+  korean/                 # English .ass subs burned in when --source kr
+  japanese/               # JP cutscene subs (work in progress)
 translations/             # per-file translation catalogs (gitignored)
 ```
 
