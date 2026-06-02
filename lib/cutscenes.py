@@ -24,6 +24,7 @@ from __future__ import annotations
 import concurrent.futures as cf
 import hashlib
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -185,29 +186,28 @@ def discover_jobs(usa_root: Path = ROOT / "work" / "usa",
 
 def build_cutscene(job: CutsceneJob, work_dir: Path, ffmpeg: Path,
                    hardsub: bool = True) -> Path:
-    """Demux source SFD → optionally hardsub → re-mux as SFD. Returns the
-    output SFD path. ``hardsub=False`` skips the libass burn-in step
-    even when the job has dialog — produces a clean source-region SFD
-    with no English text overlaid on the video."""
+    """Produce the undub SFD for one cutscene. Returns the output path.
+
+    Two paths:
+      * subs to burn (``hardsub`` and the job has dialog) — demux the
+        source SFD, burn the `.ass` in via libass, re-mux to SofDec.
+      * no subs — copy the source SFD verbatim. It is CRI's own
+        known-good container, so the engine plays the source-region
+        audio directly; re-muxing would only strip CRITAGS and drift
+        the SCR for no benefit (and trips the muxer on some streams)."""
     wd = work_dir / job.name
     wd.mkdir(parents=True, exist_ok=True)
-    m1v = wd / f"{job.name}.m1v"
-    sfa = wd / f"{job.name}.sfa"
     out = wd / f"{job.name}_undub.SFD"
 
-    _demux_sfd_via_ffmpeg(job.src_sfd, m1v, sfa, ffmpeg)
-
     if hardsub and job.has_subs:
+        m1v = wd / f"{job.name}.m1v"
+        sfa = wd / f"{job.name}.sfa"
+        _demux_sfd_via_ffmpeg(job.src_sfd, m1v, sfa, ffmpeg)
         subbed = wd / f"{job.name}_subbed.m1v"
         _hardsub_video(m1v, subbed, job.ass, ffmpeg)
-        video_for_mux = subbed
+        SofdecMuxer(subbed, sfa).write(out)
     else:
-        # No subs to burn (either disabled or empty `.ass`) — keep video
-        # as-is. Re-mux is still required so the engine's SofDec player
-        # accepts the source-region audio.
-        video_for_mux = m1v
-
-    SofdecMuxer(video_for_mux, sfa).write(out)
+        shutil.copyfile(job.src_sfd, out)
     return out
 
 
