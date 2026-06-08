@@ -385,7 +385,7 @@ def main() -> int:
     dm = sub.add_parser("dump-mkv",
                         help="dump KR/JP cutscenes as MKV (optional --hardsub)")
     dm.add_argument("--regions", default="kr,jp",
-                    help="comma-separated subset of {kr,jp} (default: kr,jp)")
+                    help="comma-separated subset of {usa,kr,jp} (default: kr,jp)")
     dm.add_argument("--hardsub", action="store_true",
                     help="burn English subs from subs/{korean,japanese}/ into the video")
     dm.add_argument("--jobs", type=int, default=4,

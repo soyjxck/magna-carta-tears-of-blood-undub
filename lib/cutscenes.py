@@ -52,8 +52,24 @@ KEEP_USA_CUTSCENES = frozenset({
     "991804",  # MOVIE99 — English scrolling text (41.63s)
 })
 
+# Cutscene(s) where we keep USA's *video* (its baked-in English credit
+# roll) but mux the source-region *audio* underneath, then burn subs on
+# top. The ending credits (189992) want the English credit names on
+# screen, the original-language ending song in the audio, and English
+# lyric subs. Only safe when USA and source share a duration so the audio
+# stays aligned — build_cutscene falls back to the normal source-region
+# demux when they don't (e.g. JP's 189992 is a different, longer roll).
+AUDIO_SWAP_CUTSCENES = frozenset({
+    "189992",  # ending credits — USA English roll + source song + lyric subs
+})
+
 SUB_DIR_FOR = {"kr": ROOT / "subs" / "korean",
                "jp": ROOT / "subs" / "japanese"}
+
+# Regions that can be dumped to MKV. USA is the English base (already in
+# English, no subtitle overlay to burn); kr/jp are the source regions and
+# can optionally carry hardsubs from SUB_DIR_FOR.
+DUMPABLE_REGIONS = ("usa", "kr", "jp")
 
 
 # --------------------------------------------------------------------------- shared low-level helpers
@@ -188,7 +204,11 @@ def build_cutscene(job: CutsceneJob, work_dir: Path, ffmpeg: Path,
                    hardsub: bool = True) -> Path:
     """Produce the undub SFD for one cutscene. Returns the output path.
 
-    Two paths:
+    Three paths:
+      * audio swap (name in ``AUDIO_SWAP_CUTSCENES``, subs present, and
+        the regions share a duration) — keep USA's video for its baked-in
+        English text, take the source-region audio, burn the `.ass` in,
+        re-mux to SofDec.
       * subs to burn (``hardsub`` and the job has dialog) — demux the
         source SFD, burn the `.ass` in via libass, re-mux to SofDec.
       * no subs — copy the source SFD verbatim. It is CRI's own
@@ -202,7 +222,15 @@ def build_cutscene(job: CutsceneJob, work_dir: Path, ffmpeg: Path,
     if hardsub and job.has_subs:
         m1v = wd / f"{job.name}.m1v"
         sfa = wd / f"{job.name}.sfa"
-        _demux_sfd_via_ffmpeg(job.src_sfd, m1v, sfa, ffmpeg)
+        # Audio swap only holds when USA and source are the same length;
+        # otherwise the swapped audio would drift, so demux normally.
+        swap = (job.name in AUDIO_SWAP_CUTSCENES
+                and abs(job.usa_dur - job.src_dur) < 1.0)
+        if swap:
+            _demux_sfd_via_ffmpeg(job.usa_sfd, m1v, wd / f"{job.name}.usa.sfa", ffmpeg)
+            _demux_sfd_via_ffmpeg(job.src_sfd, wd / f"{job.name}.src.m1v", sfa, ffmpeg)
+        else:
+            _demux_sfd_via_ffmpeg(job.src_sfd, m1v, sfa, ffmpeg)
         subbed = wd / f"{job.name}_subbed.m1v"
         _hardsub_video(m1v, subbed, job.ass, ffmpeg)
         SofdecMuxer(subbed, sfa).write(out)
@@ -366,28 +394,32 @@ def dump_all_to_mkv(regions: tuple[str, ...] = ("kr", "jp"),
                     out_root: Path = ROOT / "build" / "cutscene-dumps",
                     jobs: int = 4,
                     verbose: bool = True) -> int:
-    """Dump KR and/or JP cutscenes as MKV under
+    """Dump USA, KR and/or JP cutscenes as MKV under
     ``<out_root>/<region>[-hardsub]/<MOVIE18|MOVIE99>/<basename>.mkv``.
 
     With ``hardsub=True``, English subs from ``subs/{korean,japanese}/``
-    are burned into the chosen region's video.
+    are burned into the chosen region's video. USA is the English base and
+    always dumps raw (no subtitle dir, ``hardsub`` ignored).
     """
     ffmpeg = find_or_build_ffmpeg()
 
     queued: list[tuple[Path, Path, Path | None]] = []
     for region in regions:
-        if region not in SUB_DIR_FOR:
+        if region not in DUMPABLE_REGIONS:
             if verbose:
-                print(f"  [skip] {region}: not a supported source region "
-                      f"(use kr or jp)")
+                print(f"  [skip] {region}: not a dumpable region "
+                      f"(use usa, kr, or jp)")
             continue
         region_root = ROOT / "work" / region
         if not region_root.is_dir():
             if verbose:
                 print(f"  [skip region] {region} not extracted")
             continue
-        out_region = out_root / (f"{region}-hardsub" if hardsub else region)
-        ass_dir = SUB_DIR_FOR[region] if hardsub else None
+        # USA is the English base — there are no subs to burn, so it always
+        # dumps raw regardless of the hardsub flag.
+        use_subs = hardsub and region in SUB_DIR_FOR
+        out_region = out_root / (f"{region}-hardsub" if use_subs else region)
+        ass_dir = SUB_DIR_FOR[region] if use_subs else None
         for sub in ("MOVIE18", "MOVIE99"):
             for sfd in sorted((region_root / sub).glob("*.SFD")):
                 ass = (ass_dir / f"{sfd.stem}.ass") if ass_dir else None
