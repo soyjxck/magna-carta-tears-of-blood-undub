@@ -83,7 +83,7 @@ python3 patch.py --source kr xdelta      # build/magna-carta-tears-of-blood-undu
 # (replace --source kr with --source jp for the Japanese variant)
 ```
 
-The `subs/korean/` directory ships the English `.ass` subtitle files burned into the KR cutscenes (`subs/japanese/` is a work in progress). They're committed to the repo; rebuilding from scratch doesn't re-run any transcription.
+The `subs/korean/` directory ships the complete set of English `.ass` subtitle files burned into the KR cutscenes (`subs/japanese/` is still a work in progress). They're committed to the repo; rebuilding from scratch doesn't re-run any transcription.
 
 ### Option 3 — Re-translate with custom English  *(alpha)*
 
@@ -123,7 +123,7 @@ The game is built on Unreal Engine 2 with CRI's AFS archive format and SofDec MP
 
 The keystone discovery: SHIP.AFS slot 0 is a plaintext `(filename, decimal-size)` manifest the engine reads at boot to populate its file-size cache. When we swap USA bytes in but leave the manifest pointing at source-region sizes, the engine reads short and the parser overruns its buffer. Rebuilding the manifest with the hybrid's actual sizes is the fix that unlocks full English coverage on the world dialog (`.fpb`) and every other text format. The same trick applies to LINEAR.AFS for the texture overlay.
 
-Cutscenes use [`sfd-muxer`](https://github.com/soyjxck/sfd-muxer) — we demux source SFDs, re-encode video at 5500 kbps CBR with English subtitles (pre-shipped in `subs/`) burned in via libass, then mux back to a fresh SFD.
+Cutscenes use [`sfd-muxer`](https://github.com/soyjxck/sfd-muxer) — we demux source SFDs, re-encode video at 5500 kbps CBR with English subtitles (pre-shipped in `subs/`) burned in via libass, then mux back to a fresh SFD. The ending-credits cutscene (`189992`) is special-cased on the KR patch: it keeps the USA English credit-roll video and swaps in only the Korean ending-song audio, with GXZ95's English song credits + lyrics burned over masked-out baked text. See [TECHNICAL.md](TECHNICAL.md#cutscene-sfds) for the mask technique.
 
 Full reverse-engineering record in [TECHNICAL.md](TECHNICAL.md).
 

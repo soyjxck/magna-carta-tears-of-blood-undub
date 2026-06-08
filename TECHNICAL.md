@@ -738,6 +738,49 @@ that don't affect playback:
 Both differences are inert — the engine reads streams by start codes
 and uses each PES's own PTS/DTS for sync, not the pack-head SCR.
 
+### Special case: `189992` ending credits (KR patch)
+
+`189992` is the ending credit roll: the **video** is a scrolling credits
+sequence with baked-in staff + song credits, and the **audio** is the
+ending song. The normal pipeline would replace the whole thing with the
+source-region (KR) version — but USA's credit roll is already in English
+and worth keeping. So `189992` is handled by an **audio swap** instead of
+a full source-region demux (`AUDIO_SWAP_CUTSCENES = {"189992"}` in
+`lib/cutscenes.py`):
+
+1. Demux the **USA** SFD → keep its MPEG-1 video (the English credit roll).
+2. Demux the **source (KR)** SFD → take only its ADX audio (the Korean song).
+3. Hardsub the USA video with `subs/korean/189992.ass` (GXZ95's English
+   song credits + lyrics) via libass.
+4. Mux subbed USA video + KR audio → output SFD.
+
+The swap is gated on `abs(usa_dur - src_dur) < 1.0`: it only fires when the
+two regions' cutscenes line up. KR's `189992` matches USA (~263.86 s) so the
+swap fires; **JP's differs in length, fails the gate, and falls back to the
+normal source-region pipeline — so this credits fix is KR-only.**
+
+**Masking the baked credits.** GXZ95's English song-credit overlays are
+narrower than the baked USA credit text they sit on top of, so the wider
+baked text leaks out past the edges of each overlay line. The fix is burned
+into the `.ass`: seven full-width opaque-black `\p1` vector rectangles, one
+behind each song-credit overlay line. The credit roll's background is black,
+so a black bar is invisible over it — but it covers (erases) the wider baked
+USA text underneath. Details that matter:
+
+- **No `\fade` on the bars.** A fade would let baked text flash through
+  during the fade window; the bar is invisible against the black background
+  anyway, so it stays fully opaque the whole time.
+- **No `\clip`.** The bars span the full frame height so they keep covering
+  baked text while a credit line fades in from the bottom of the frame.
+- **Layering:** mask bars on layer 0, the song-credit overlays on layer 1
+  (above the mask), song lyrics on layer 2 (always on top).
+- GXZ95's own added credits (Undub / English Translation / FMVs) sit over
+  plain black with no baked text under them, so they are **not** masked.
+
+The masked file ships directly as `subs/korean/189992.ass` (the generator
+was a one-off and isn't kept in the repo). Its sha256 is folded into the
+cutscene cache stamp, so editing it rebuilds only this one SFD.
+
 ---
 
 ## The hybrid undub architecture
