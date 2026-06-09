@@ -7,27 +7,9 @@
 > as edge cases surface. File issues for any boot crashes, scene hangs, or
 > rendering glitches you hit.
 
-Restores the original Korean **or** Japanese voice acting in the USA PS2 release of *Magna Carta: Tears of Blood* (SLUS-21221). Two separate xdelta patches — pick whichever VO you prefer. Cutscenes are re-encoded with the source region's audio + English subtitles burned into the video; in-game dialog runs from the source region's audio archive while the UI / item / dialog text stays English.
+Restores the original Korean **or** Japanese voice acting in the USA PS2 release of *Magna Carta: Tears of Blood* (SLUS-21221). Two separate xdelta patches — pick whichever VO you prefer. Cutscenes use the source region's audio; in-game dialog runs from the source region's audio archive while the UI / item / dialog text stays English. The Korean patch has English subtitles (by GXZ95) burned into the cutscenes; the Japanese patch does not currently have cutscene subtitles.
 
 If this helped you, consider [buying me a coffee](https://ko-fi.com/soyjack)
-
-## What's Changed
-
-Each patch (KR or JP) gives:
-
-| Content | Status |
-|---|---|
-| Cutscene voice (~39 SFDs) | Source-region audio + English subtitles burned into video |
-| In-game character voice | Source-region (full source `MUSIC.AFS` swapped in) |
-| Battle voices, NPC barks | Source-region |
-| World NPC dialog (`.fpb`) | English text on source-region voice |
-| Phone conversations + option dialogs (`.cht`) | English |
-| Talisman tutorial popups (`.pod`) | English |
-| Side-quest text + chest reward names (`.odd`) | English |
-| UI labels, item names, abilities, monster bestiary, talisman descriptions | English |
-| Menu tabs / title screen / HUD textures | English (LINEAR.AFS texture overlay) |
-| Engine messages, menus | English (USA boot ELF + USA fonts kept) |
-| Music + SFX | Unchanged |
 
 ## How to Patch
 
