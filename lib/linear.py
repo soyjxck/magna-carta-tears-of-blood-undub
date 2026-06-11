@@ -40,8 +40,7 @@ from cri_afs import Afs
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
-from afs import finalize_hybrid_afs
-
+from afs import filename_toc, finalize_hybrid_afs
 
 MANIFEST_NAME = "AFSLINEARFileIndex.idx"
 MANIFEST_HEADER = "AFSLINEARFileIndex"  # written without the .idx in the body
@@ -141,8 +140,10 @@ def build(out_path: Path | None = None,
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    usa = Afs.open(usa_linear); usa_n = usa.read_filename_toc()
-    src = Afs.open(src_linear); src_n = src.read_filename_toc()
+    usa = Afs.open(usa_linear)
+    usa_n = filename_toc(usa)
+    src = Afs.open(src_linear)
+    src_n = filename_toc(src)
     usa_idx = {n.lower(): i for i, n in enumerate(usa_n)}
 
     entries: list[tuple[str, bytes]] = []

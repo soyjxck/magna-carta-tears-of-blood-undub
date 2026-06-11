@@ -28,7 +28,6 @@ from translate.fpb import parse_fpb_raw, synthesize_implicit_seq0
 from translate.region import REGION_OVERLAY_EXTS, find_text_regions
 from translate.slot import SLOT_FORMATS, parse_slot_file, split_slot
 
-
 # Engine-meaningful tokens the translator must preserve byte-for-byte.
 # - "$n"     line break (most common, ~3000+ occurrences)
 # - "$D<NN>" portrait/speaker/voice marker (14 records, all in .fpb)
@@ -88,7 +87,8 @@ def _token_drop_warning(usa_en: str, cat_en: str) -> str | None:
             missing.append(f"{tok}×{n_usa - n_cat}")
     if not missing:
         return None
-    return f"engine tokens dropped: {', '.join(missing)} (don't translate these — they're runtime instructions)"
+    return (f"engine tokens dropped: {', '.join(missing)} "
+            f"(don't translate these — they're runtime instructions)")
 
 
 # Game-derived dialog-box rendering constraints (measured from USA's text):
@@ -171,7 +171,10 @@ def _audit_fpb(catalog_path: Path, usa_blob: bytes,
                             f"USA has {len(usa_windows)} (don't add or remove records)"))
 
     file_edited = False
-    for k, (rec, (seq, off, ln)) in enumerate(zip(cat_records, usa_windows)):
+    # strict=False: a count mismatch was already reported as an error above;
+    # still audit the comparable prefix.
+    for k, (rec, (seq, off, ln)) in enumerate(
+            zip(cat_records, usa_windows, strict=False)):
         loc = f"records[{k}]"
         usa_en = usa_data[off:off + ln].decode("latin-1", errors="replace")
 
@@ -231,7 +234,8 @@ def _audit_slot(ext: str, catalog_path: Path, usa_blob: bytes,
     if len(cat_slots) != len(usa_slots):
         issues.append(Issue(catalog_path, "slots", "",
                             "error",
-                            f"slot count mismatch: catalog {len(cat_slots)} vs USA {len(usa_slots)} "
+                            f"slot count mismatch: catalog {len(cat_slots)} vs "
+                            f"USA {len(usa_slots)} "
                             f"(don't add or remove slots — re-extract if needed)"))
 
     file_edited = False
@@ -254,6 +258,7 @@ def _audit_slot(ext: str, catalog_path: Path, usa_blob: bytes,
             issues.append(Issue(catalog_path, loc, "en", "error", err))
             status.total_records += 1
             continue
+        assert encoded is not None  # err is None ⇒ encode succeeded
 
         # Cap: must fit before the engine trailer (1 byte reserved for null)
         max_bytes = usa_tail_at - 1
@@ -307,12 +312,14 @@ def _audit_region(ext: str, catalog_path: Path, usa_blob: bytes,
     if len(cat_regions) != len(usa_regions):
         issues.append(Issue(catalog_path, "regions", "",
                             "error",
-                            f"region count mismatch: catalog {len(cat_regions)} vs USA {len(usa_regions)} "
+                            f"region count mismatch: catalog {len(cat_regions)} "
+                            f"vs USA {len(usa_regions)} "
                             f"(don't add or remove regions — re-extract if needed)"))
 
     file_edited = False
+    # strict=False: count mismatch already reported above; audit the prefix.
     for k, ((usa_off, usa_len), cap, rec) in enumerate(
-            zip(usa_regions, usa_caps, cat_regions)):
+            zip(usa_regions, usa_caps, cat_regions, strict=False)):
         loc = f"region[{k}]"
 
         cat_en = rec.get("en", "")
@@ -327,6 +334,7 @@ def _audit_region(ext: str, catalog_path: Path, usa_blob: bytes,
             issues.append(Issue(catalog_path, loc, "en", "error", err))
             status.total_records += 1
             continue
+        assert encoded is not None  # err is None ⇒ encode succeeded
 
         if len(encoded) > cap:
             issues.append(Issue(
@@ -372,9 +380,10 @@ def _audit_celfid(catalog_path: Path, usa_file_afs: Path,
     cat_groups = cat.get("linked_groups", [])
     file_edited = False
 
-    def _check_one(loc: str, marker_hex, max_bytes, en_for_slot, usa_en):
+    def _check_one(loc: str, marker_hex: object, max_bytes: object,
+                   en_for_slot: object, usa_en: str) -> None:
         """Run the per-slot validation common to both stand-alones and
-        group members. Returns the cap-violation flag; updates status."""
+        group members. Appends to ``issues`` and updates ``status``."""
         nonlocal file_edited
         if not isinstance(marker_hex, str) or not isinstance(max_bytes, int):
             issues.append(Issue(catalog_path, loc, "marker/max_bytes",
@@ -414,6 +423,7 @@ def _audit_celfid(catalog_path: Path, usa_file_afs: Path,
             issues.append(Issue(catalog_path, loc, "en", "error", err))
             status.total_records += 1
             return
+        assert encoded is not None  # err is None ⇒ encode succeeded
         cap = max_bytes - 1
         if len(encoded) > cap:
             issues.append(Issue(
@@ -455,7 +465,8 @@ def _audit_celfid(catalog_path: Path, usa_file_afs: Path,
                 continue
             marker = bytes.fromhex(member.get("marker", "00")) if member.get("marker") else b""
             idx = decomp.find(marker) if marker else -1
-            usa_en = _string_at(decomp, idx + len(marker), encoding="latin-1")[0] if idx >= 0 else ""
+            usa_en = (_string_at(decomp, idx + len(marker), encoding="latin-1")[0]
+                      if idx >= 0 else "")
             _check_one(f"linked_groups[{gi}][{grp.get('base')!r}].slots[{k}]",
                        member.get("marker"), member.get("max_bytes"),
                        derived_en, usa_en)

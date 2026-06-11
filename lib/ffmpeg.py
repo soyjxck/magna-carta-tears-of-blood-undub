@@ -35,8 +35,8 @@ def _candidates() -> list[Path]:
     sys_path = shutil.which("ffmpeg")
     if sys_path:
         paths.append(Path(sys_path))
-    for p in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"):
-        paths.append(Path(p))
+    for cand in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"):
+        paths.append(Path(cand))
     seen: set[Path] = set()
     out: list[Path] = []
     for p in paths:

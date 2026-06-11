@@ -18,8 +18,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from translate._common import (CATALOG_DIR, decode_safe, encode_en, open_ship_handles)
+from afs import filename_toc
 
+from translate._common import CATALOG_DIR, encode_en, open_ship_handles
 
 # header_size + count * slot_stride per extension
 SLOT_FORMATS: dict[str, tuple[int, int]] = {
@@ -157,7 +158,7 @@ def extract_all_slot(ext: str,
         usa_ship, kr_ship, jp_ship)
     written = 0
     try:
-        usa_n = usa.read_filename_toc()
+        usa_n = filename_toc(usa)
         for i, name in enumerate(usa_n):
             if not name.lower().endswith(ext):
                 continue
@@ -184,9 +185,9 @@ def extract_all_slot(ext: str,
                 except ValueError:
                     pass
 
-            slots_out: list[dict] = []
+            slots_out: list[dict[str, str]] = []
             for k, (slot, cap) in enumerate(u_slots):
-                rec: dict = {"en": _slot_text(slot, "latin-1", cap)}
+                rec: dict[str, str] = {"en": _slot_text(slot, "latin-1", cap)}
                 if k < len(k_slots):
                     rec["kr"] = _slot_text(k_slots[k][0], "cp949", k_slots[k][1])
                 if k < len(j_slots):
@@ -230,7 +231,7 @@ def translated_slot_bytes(ext: str, name: str, usa_blob: bytes,
     # changed, return None so the caller writes USA bytes verbatim.
     if len(cat_slots) == len(orig_slots):
         any_edit = False
-        for rec, (slot, cap) in zip(cat_slots, orig_slots):
+        for rec, (slot, cap) in zip(cat_slots, orig_slots, strict=True):
             usa_string, _, _ = split_slot(slot, cap)
             usa_en = usa_string.decode("latin-1", errors="replace")
             if rec.get("en", "") != usa_en:

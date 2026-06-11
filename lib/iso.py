@@ -146,10 +146,7 @@ def patch_iso(src_iso: Path, out_iso: Path, replacements: dict[str, Path],
     by_dir: dict[str, list[tuple[str, Path]]] = {}
     for iso_path, new_file in replacements.items():
         stripped = iso_path.strip("/")
-        if "/" in stripped:
-            parent = "/" + stripped.rsplit("/", 1)[0]
-        else:
-            parent = "/"  # root-level file
+        parent = ("/" + stripped.rsplit("/", 1)[0]) if "/" in stripped else "/"
         by_dir.setdefault(parent, []).append((iso_path, new_file))
 
     # Find current ISO end (in sectors) so we know where to append.
@@ -158,7 +155,7 @@ def patch_iso(src_iso: Path, out_iso: Path, replacements: dict[str, Path],
 
     in_place = 0
     relocated = 0
-    dir_patches: dict[str, bytearray] = {}
+    dir_patches: dict[str, tuple[int, bytearray]] = {}
 
     with out_iso.open("r+b") as fh:
         for parent, jobs in by_dir.items():
@@ -177,11 +174,12 @@ def patch_iso(src_iso: Path, out_iso: Path, replacements: dict[str, Path],
                     fh.seek(old_lba * SECTOR)
                     fh.write(data)
                     fh.write(b"\xff" * (old_size - len(data)))
-                    if len(data) != old_size:
-                        # Patch the directory entry so isoinfo / engine reads
-                        # the actual file size, not the padded slot size.
-                        if not _patch_dir_entry(blob, name_only, old_lba, len(data)):
-                            raise RuntimeError(f"could not find dir entry for {iso_path}")
+                    # Patch the directory entry so isoinfo / engine reads
+                    # the actual file size, not the padded slot size.
+                    if (len(data) != old_size
+                            and not _patch_dir_entry(blob, name_only, old_lba,
+                                                     len(data))):
+                        raise RuntimeError(f"could not find dir entry for {iso_path}")
                     in_place += 1
                     if verbose:
                         print(f"  [in-place] {iso_path}  {len(data):,} B (slot {old_size:,})")
@@ -205,10 +203,10 @@ def patch_iso(src_iso: Path, out_iso: Path, replacements: dict[str, Path],
                         print(f"  [reloc]    {iso_path}  {len(data):,} B  "
                               f"old slot {old_size:,}  -> LBA {new_lba}")
 
-            dir_patches[parent] = (dir_lba, dir_size, blob)
+            dir_patches[parent] = (dir_lba, blob)
 
         # Write back patched directories
-        for parent, (dir_lba, dir_size, blob) in dir_patches.items():
+        for dir_lba, blob in dir_patches.values():
             fh.seek(dir_lba * SECTOR)
             fh.write(bytes(blob))
 

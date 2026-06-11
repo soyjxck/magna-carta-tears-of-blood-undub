@@ -30,12 +30,12 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeGuard
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
-from sfd_muxer import SFD, SofdecMuxer
 from ffmpeg import find_or_build_ffmpeg
-
+from sfd_muxer import SFD, SofdecMuxer
 
 # Visual-quality CBR for re-encoded cutscenes. Slot fit is the ISO
 # patcher's problem — it relocates oversize files past the original ISO
@@ -72,10 +72,10 @@ SUB_DIR_FOR = {"kr": ROOT / "subs" / "korean",
 DUMPABLE_REGIONS = ("usa", "kr", "jp")
 
 
-# --------------------------------------------------------------------------- shared low-level helpers
+# ------------------------------------------------------------------------- shared low-level helpers
 
 
-def _has_dialogue(ass: Path | None) -> bool:
+def _has_dialogue(ass: Path | None) -> TypeGuard[Path]:
     """True if `ass` exists and contains at least one ``Dialogue:`` line.
 
     Empty/template `.ass` files (no dialog lines) skip the libass step.
@@ -85,12 +85,13 @@ def _has_dialogue(ass: Path | None) -> bool:
     return "Dialogue:" in ass.read_text()
 
 
-def _cache_stamp(job: "CutsceneJob", hardsub: bool) -> dict:
+def _cache_stamp(job: CutsceneJob, hardsub: bool) -> dict[str, object]:
     """Inputs that determine the cached SFD. Cached output is reused only
     when its sidecar stamp equals this dict — covers added/removed/edited
     `.ass`, source SFD changes, and hardsub flag flips."""
     ass_info = None
     if job.has_subs:
+        assert job.ass is not None  # has_subs ⇒ an .ass file exists
         ass_info = {
             "size": job.ass.stat().st_size,
             "sha256": hashlib.sha256(job.ass.read_bytes()).hexdigest(),
@@ -150,7 +151,7 @@ def _hardsub_video(m1v_in: Path, m1v_out: Path, ass: Path, ffmpeg: Path,
     )
 
 
-# --------------------------------------------------------------------------- SFD pipeline (build-iso)
+# ------------------------------------------------------------------------- SFD pipeline (build-iso)
 
 
 @dataclass
@@ -246,6 +247,7 @@ def build_cutscene(job: CutsceneJob, work_dir: Path, ffmpeg: Path,
             else:
                 _demux_sfd_via_ffmpeg(job.src_sfd, m1v, sfa, ffmpeg)
             subbed = wd / f"{job.name}_subbed.m1v"
+            assert job.ass is not None  # guarded by job.has_subs above
             _hardsub_video(m1v, subbed, job.ass, ffmpeg)
             SofdecMuxer(subbed, sfa).write(tmp)
         else:
@@ -328,7 +330,7 @@ def run_all(work_dir: Path = ROOT / "build" / "cutscenes-kr",
     return out
 
 
-# --------------------------------------------------------------------------- MKV dump pipeline (dump-mkv)
+# --------------------------------------------------------------------- MKV dump pipeline (dump-mkv)
 
 
 def _demux_sfd_via_sfd_muxer(sfd_path: Path) -> tuple[bytes, bytes] | None:

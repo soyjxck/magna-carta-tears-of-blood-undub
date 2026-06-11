@@ -32,16 +32,14 @@ from __future__ import annotations
 import json
 import re
 import struct
-import sys
 import zlib
 from pathlib import Path
-from typing import Iterable
+from typing import NotRequired, TypedDict
 
+from afs import filename_toc, rebuild_afs
 from cri_afs import Afs
 
-from afs import rebuild_afs
-from translate._common import CATALOG_DIR, decode_safe, encode_en
-
+from translate._common import CATALOG_DIR, encode_en
 
 CHUNK_SIZE = 24576
 
@@ -76,7 +74,7 @@ def recompress_chunked(decomp: bytes, chunk_size: int = CHUNK_SIZE) -> bytes:
 
 def _read_celfid(file_afs_path: Path) -> bytes:
     afs = Afs.open(file_afs_path)
-    n = afs.read_filename_toc()
+    n = filename_toc(afs)
     idx = {x.lower(): i for i, x in enumerate(n)}
     if "celfid.lix" not in idx:
         raise ValueError(f"{file_afs_path}: no celfid.lix entry")
@@ -105,7 +103,31 @@ def _string_at(blob: bytes, start: int, max_search: int = 200,
 _RUN_OF_LOWER_RE = re.compile(r"[a-z]{3,}")
 
 
-def _find_slots(usa_decomp: bytes) -> list[dict]:
+class _SlotRec(TypedDict):
+    """One extracted slot: a 16-byte hex marker that locates it in the
+    decompressed celfid.lix, the measured byte capacity, and the text."""
+    marker: str
+    max_bytes: int
+    en: str
+    kr: NotRequired[str]
+    jp: NotRequired[str]
+    _offset: NotRequired[int]
+
+
+class _GroupSlot(TypedDict):
+    marker: str
+    max_bytes: int
+    template: str
+    kr: NotRequired[str]
+    jp: NotRequired[str]
+
+
+class _Group(TypedDict):
+    base: str
+    slots: list[_GroupSlot]
+
+
+def _find_slots(usa_decomp: bytes) -> list[_SlotRec]:
     """Walk USA's celfid.lix and return one record per filtered fixed-slot
     string. Each record carries the 16-byte structural marker preceding it.
 
@@ -113,16 +135,16 @@ def _find_slots(usa_decomp: bytes) -> list[dict]:
     has a run of ≥3 consecutive lowercase letters somewhere (a real word).
     Strings like ``"Px A"`` or ``"Cx F"`` that pass the bare regex but
     aren't real text get rejected."""
-    out: list[dict] = []
+    out: list[_SlotRec] = []
     for m in _SLOT_RE.finditer(usa_decomp):
         text = m.group(1).decode("latin-1")
         if len(text) < 4:
             continue
-        if not _RUN_OF_LOWER_RE.search(text):
-            # Allow a couple structured exceptions: ALL-CAPS abbreviations
-            # like "ACC", "ATK" that are real UI labels, IFF length is small
-            if not (text.isupper() and 2 < len(text) <= 4):
-                continue
+        # Require a real word, with an exception for short ALL-CAPS UI
+        # labels like "ACC"/"ATK".
+        if (not _RUN_OF_LOWER_RE.search(text)
+                and not (text.isupper() and 2 < len(text) <= 4)):
+            continue
         # Junk filter: too many non-letter chars (excluding spaces)
         letters = sum(1 for c in text if c.isalpha())
         non_letters = len(text) - text.count(" ") - letters
@@ -133,8 +155,6 @@ def _find_slots(usa_decomp: bytes) -> list[dict]:
         if _FF_MARKER not in marker:
             continue
         # Capacity: slot's null-padding bytes after the string
-        end = m.end()  # this is right after the run of trailing nulls already
-        # Actually m.end() is past the last \x00 in the {3,} group. Recompute:
         s_end = m.start() + len(m.group(1))   # text end
         pos = s_end
         while pos < len(usa_decomp) and usa_decomp[pos] == 0 and pos < s_end + 96:
@@ -149,7 +169,8 @@ def _find_slots(usa_decomp: bytes) -> list[dict]:
     return out
 
 
-def _detect_linked_groups(slots: list[dict]) -> tuple[list[dict], list[dict]]:
+def _detect_linked_groups(slots: list[_SlotRec]
+                          ) -> tuple[list[_Group], list[_SlotRec]]:
     """Cluster slots whose strings cross-reference each other via shared
     substrings. Returns ``(linked_groups, leaf_slots)``.
 
@@ -190,7 +211,7 @@ def _detect_linked_groups(slots: list[dict]) -> tuple[list[dict], list[dict]]:
     candidates.sort(key=lambda b: (-len(b), b))
 
     in_group: set[int] = set()
-    groups: list[dict] = []
+    groups: list[_Group] = []
     for base in candidates:
         members: list[int] = []
         for i, s in enumerate(slots):
@@ -204,10 +225,10 @@ def _detect_linked_groups(slots: list[dict]) -> tuple[list[dict], list[dict]]:
             members.append(i)
         if len(members) < 2:
             continue
-        group = {"base": base, "slots": []}
+        group: _Group = {"base": base, "slots": []}
         for i in members:
             t = slots[i]
-            entry = {
+            entry: _GroupSlot = {
                 "marker": t["marker"],
                 "max_bytes": t["max_bytes"],
                 "template": t["en"].replace(base, "{base}", 1),
@@ -240,21 +261,21 @@ def _detect_linked_groups(slots: list[dict]) -> tuple[list[dict], list[dict]]:
     for text, indices in by_text.items():
         if len(indices) < 2:
             continue
-        group = {"base": text, "slots": []}
+        dup_group: _Group = {"base": text, "slots": []}
         for i in indices:
             t = slots[i]
-            entry = {
+            dup_entry: _GroupSlot = {
                 "marker": t["marker"],
                 "max_bytes": t["max_bytes"],
                 "template": "{base}",
             }
             if "kr" in t:
-                entry["kr"] = t["kr"]
+                dup_entry["kr"] = t["kr"]
             if "jp" in t:
-                entry["jp"] = t["jp"]
-            group["slots"].append(entry)
+                dup_entry["jp"] = t["jp"]
+            dup_group["slots"].append(dup_entry)
             in_group.add(i)
-        groups.append(group)
+        groups.append(dup_group)
 
     leaves = [slots[i] for i in range(len(slots)) if i not in in_group]
     return groups, leaves
@@ -280,7 +301,7 @@ def extract_celfid_catalog(usa_file_afs: Path,
     # appear at multiple positions — find() would land on the wrong one
     # at patch time. Drop those slots; the catalog-keyed approach can't
     # safely round-trip them.
-    kept: list[dict] = []
+    kept: list[_SlotRec] = []
     for s in slots:
         marker_bytes = bytes.fromhex(s["marker"])
         if usa.count(marker_bytes) != 1:

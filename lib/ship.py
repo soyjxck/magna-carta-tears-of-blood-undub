@@ -40,17 +40,22 @@ voice/scene path.
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 from cri_afs import Afs
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
-from afs import finalize_hybrid_afs
-from translate import (SLOT_FORMATS, REGION_OVERLAY_EXTS,
-                       translated_fpb_bytes, translated_slot_bytes,
-                       translated_region_bytes)
-
+from afs import filename_toc, finalize_hybrid_afs
+from translate import (
+    REGION_OVERLAY_EXTS,
+    SLOT_FORMATS,
+    translated_fpb_bytes,
+    translated_region_bytes,
+    translated_slot_bytes,
+)
 
 # Extensions that hold English text in USA / Korean text in KR.
 # Swap to USA for English UI/dialog/items.
@@ -88,7 +93,8 @@ MANIFEST_NAME = "AFSShipFileIndex.idx"
 
 
 def _pick_entry_blob(name: str, ext: str, usa_blob: bytes | None,
-                     src_blob_reader, translations_dir: Path | None
+                     src_blob_reader: Callable[[], bytes],
+                     translations_dir: Path | None
                      ) -> tuple[bytes, str]:
     """Decide what bytes to write for one SHIP entry. Returns
     ``(blob, kind)`` where ``kind`` is one of:
@@ -151,8 +157,9 @@ def build(out_path: Path | None = None,
         out_path = ROOT / "build" / region_tag / "SHIP.AFS"
 
     usa = Afs.open(usa_ship)
-    src = Afs.open(src_ship); src_n = src.read_filename_toc()
-    usa_n = usa.read_filename_toc()
+    src = Afs.open(src_ship)
+    src_n = filename_toc(src)
+    usa_n = filename_toc(usa)
     usa_idx = {n.lower(): i for i, n in enumerate(usa_n)}
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -167,7 +174,7 @@ def build(out_path: Path | None = None,
                         if lname in usa_idx else None)
             blob, kind = _pick_entry_blob(
                 name, ext, usa_blob,
-                lambda: src.read_entry(i, fh_src),
+                partial(src.read_entry, i, fh_src),
                 translations_dir,
             )
             counts[kind] = counts.get(kind, 0) + 1

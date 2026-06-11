@@ -61,13 +61,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "lib"))
 
-from cutscenes import SUB_DIR_FOR, dump_all_to_mkv, run_all as run_cutscenes
+from cutscenes import SUB_DIR_FOR, dump_all_to_mkv
+from cutscenes import run_all as run_cutscenes
 from ffmpeg import find_or_build_ffmpeg
 from iso import patch_iso
 from linear import build as build_linear
 from ship import build as build_ship
-from translate import (extract_all, CATALOG_DIR, audit_all, format_status_table,
-                       extract_celfid_catalog, build_file_afs_with_celfid)
+from translate import (
+    audit_all,
+    build_file_afs_with_celfid,
+    extract_all,
+    extract_celfid_catalog,
+    format_status_table,
+)
 
 DEFAULT_USA_ISO = ROOT / "roms" / "Magna Carta - Tears of Blood (USA).iso"
 DEFAULT_SOURCE_ISOS = {
@@ -134,7 +140,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
     p = _paths(args.source)
     _ensure_extracted(args.usa_iso, WORK / "usa")
     _ensure_extracted(p["src_iso"], p["src_root"])
-    print(f"  ensuring ffmpeg with libass ...")
+    print("  ensuring ffmpeg with libass ...")
     bin_path = find_or_build_ffmpeg()
     print(f"  ffmpeg ready: {bin_path}")
     return 0
@@ -173,7 +179,8 @@ def cmd_build_iso(args: argparse.Namespace) -> int:
         n_movies = len([k for k in replacements if k.startswith('/MOVIE')])
         print(f"  Phase 1: {n_movies} cutscene SFD swaps queued")
     else:
-        print(f"  Phase 1: no cutscenes built — run `patch.py cutscenes --source {args.source}` first")
+        print(f"  Phase 1: no cutscenes built — "
+              f"run `patch.py cutscenes --source {args.source}` first")
 
     # Phase 3: build hybrid SHIP.AFS + hybrid LINEAR.AFS, then queue the AFS swaps
     tx_arg = getattr(args, "translations", None)
@@ -182,7 +189,8 @@ def cmd_build_iso(args: argparse.Namespace) -> int:
         if not tx_dir.exists():
             sys.exit(f"--translations {tx_dir} doesn't exist — "
                      f"run `patch.py translate-extract --out {tx_dir.name}` first")
-        print(f"  Phase 3: building {args.source}-base hybrid SHIP.AFS with USA text overlays + translations from {tx_dir}")
+        print(f"  Phase 3: building {args.source}-base hybrid SHIP.AFS "
+              f"with USA text overlays + translations from {tx_dir}")
     else:
         print(f"  Phase 3: building {args.source}-base hybrid SHIP.AFS with USA text overlays")
     build_ship(out_path=p["ship_hybrid"], src_ship=p["src_ship"],
@@ -190,8 +198,10 @@ def cmd_build_iso(args: argparse.Namespace) -> int:
     if not p["ship_hybrid"].exists():
         sys.exit(f"hybrid SHIP.AFS missing at {p['ship_hybrid']}")
     if not p["src_linear"].exists() or not p["src_music"].exists():
-        sys.exit(f"source LINEAR.AFS / MUSIC.AFS missing — run `patch.py setup --source {args.source}` first")
-    print(f"  Phase 3: building {args.source}-base hybrid LINEAR.AFS with USA texture/staticmesh overlays")
+        sys.exit(f"source LINEAR.AFS / MUSIC.AFS missing — "
+                 f"run `patch.py setup --source {args.source}` first")
+    print(f"  Phase 3: building {args.source}-base hybrid LINEAR.AFS "
+          f"with USA texture/staticmesh overlays")
     build_linear(out_path=p["linear_hybrid"], src_linear=p["src_linear"], source=args.source)
     if not p["linear_hybrid"].exists():
         sys.exit(f"hybrid LINEAR.AFS missing at {p['linear_hybrid']}")
@@ -388,7 +398,8 @@ def main() -> int:
     dm.set_defaults(func=cmd_dump_mkv)
 
     args = ap.parse_args()
-    return args.func(args)
+    ret: int = args.func(args)
+    return ret
 
 
 if __name__ == "__main__":

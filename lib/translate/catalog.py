@@ -9,7 +9,6 @@ from translate.fpb import extract_all_fpb
 from translate.region import REGION_OVERLAY_EXTS, extract_all_region
 from translate.slot import SLOT_FORMATS, extract_all_slot
 
-
 SUPPORTED_EXTS = (".fpb", *SLOT_FORMATS.keys(), *REGION_OVERLAY_EXTS)
 
 

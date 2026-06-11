@@ -31,7 +31,9 @@ import struct
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from translate._common import (CATALOG_DIR, decode_safe, encode_en, open_ship_handles)
+from afs import filename_toc
+
+from translate._common import CATALOG_DIR, decode_safe, encode_en, open_ship_handles
 
 Window = tuple[int, int, int]  # (seq, offset, length)
 
@@ -232,7 +234,7 @@ def extract_all_fpb(usa_ship: Path,
         usa_ship, kr_ship, jp_ship)
     written = 0
     try:
-        usa_n = usa.read_filename_toc()
+        usa_n = filename_toc(usa)
         for i, name in enumerate(usa_n):
             if not name.lower().endswith(".fpb"):
                 continue
@@ -249,7 +251,7 @@ def extract_all_fpb(usa_ship: Path,
                 p = _records_for(blob, "cp949")
                 if p is not None:
                     kr_w, kr_data = p
-                    kr_by_seq = {s: (o, l) for s, o, l in kr_w}
+                    kr_by_seq = {s: (o, ln) for s, o, ln in kr_w}
 
             jp_by_seq: dict[int, tuple[int, int]] = {}
             jp_data = b""
@@ -258,11 +260,11 @@ def extract_all_fpb(usa_ship: Path,
                 p = _records_for(blob, "shift_jis")
                 if p is not None:
                     jp_w, jp_data = p
-                    jp_by_seq = {s: (o, l) for s, o, l in jp_w}
+                    jp_by_seq = {s: (o, ln) for s, o, ln in jp_w}
 
-            records: list[dict] = []
+            records: list[dict[str, int | str]] = []
             for seq, off, ln in usa_windows:
-                rec: dict = {
+                rec: dict[str, int | str] = {
                     "seq": seq,
                     "en": decode_safe(usa_data[off:off + ln], "latin-1"),
                 }
@@ -315,7 +317,7 @@ def translated_fpb_bytes(name: str, usa_blob: bytes,
     # bytes verbatim — pool data outside any window is preserved.
     if len(cat_records) == len(usa_synth):
         any_edit = False
-        for rec, (_, off, ln) in zip(cat_records, usa_synth):
+        for rec, (_, off, ln) in zip(cat_records, usa_synth, strict=True):
             usa_en = usa_data[off:off + ln].decode("latin-1", errors="replace")
             if rec.get("en", "") != usa_en:
                 any_edit = True

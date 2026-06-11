@@ -21,8 +21,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from translate._common import (CATALOG_DIR, decode_safe, encode_en, open_ship_handles)
+from afs import filename_toc
 
+from translate._common import CATALOG_DIR, decode_safe, encode_en, open_ship_handles
 
 REGION_OVERLAY_EXTS = (".pod", ".tui", ".itm", ".abi", ".sgi", ".nod",
                        ".dod", ".cls", ".att", ".val")
@@ -125,7 +126,7 @@ def extract_all_region(ext: str,
         usa_ship, kr_ship, jp_ship)
     written = 0
     try:
-        usa_n = usa.read_filename_toc()
+        usa_n = filename_toc(usa)
         for i, name in enumerate(usa_n):
             if not name.lower().endswith(ext):
                 continue
@@ -140,9 +141,9 @@ def extract_all_region(ext: str,
                        if jp_pair is not None and name.lower() in jp_pair[1]
                        else None)
 
-            cat_regions: list[dict] = []
+            cat_regions: list[dict[str, str]] = []
             for offset, length, cap in regions:
-                rec: dict = {
+                rec: dict[str, str] = {
                     "en": decode_safe(usa_blob[offset:offset + length], "latin-1"),
                 }
                 kr_text = _src_text_at(kr_blob, offset, cap, "cp949")
@@ -190,7 +191,8 @@ def translated_region_bytes(ext: str, name: str, usa_blob: bytes,
     # Edit detection: any region whose en differs from USA?
     if len(cat_regions) == len(usa_regions):
         any_edit = False
-        for rec, (offset, length, _cap) in zip(cat_regions, usa_regions):
+        for rec, (offset, length, _cap) in zip(cat_regions, usa_regions,
+                                               strict=True):
             usa_en = usa_blob[offset:offset + length].decode(
                 "latin-1", errors="replace")
             if rec.get("en", "") != usa_en:
@@ -200,7 +202,10 @@ def translated_region_bytes(ext: str, name: str, usa_blob: bytes,
             return None
 
     out = bytearray(usa_blob)
-    for k, ((offset, _length, cap), rec) in enumerate(zip(usa_regions, cat_regions)):
+    # strict: a stale catalog (region count drift) must fail loudly here, not
+    # pair text to the wrong regions by position.
+    for k, ((offset, _length, cap), rec) in enumerate(
+            zip(usa_regions, cat_regions, strict=True)):
         if "en" not in rec:
             continue
         s = encode_en(rec["en"])

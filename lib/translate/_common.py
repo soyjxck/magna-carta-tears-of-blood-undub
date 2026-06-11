@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import BinaryIO
 
+from afs import filename_toc
 from cri_afs import Afs
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -54,20 +55,20 @@ def open_ship_handles(usa_ship: Path,
     closing the file handles in fhs.
     """
     usa = Afs.open(usa_ship)
-    usa_idx = {n.lower(): i for i, n in enumerate(usa.read_filename_toc())}
+    usa_idx = {n.lower(): i for i, n in enumerate(filename_toc(usa))}
     fhs: dict[str, BinaryIO] = {"usa": usa_ship.open("rb")}
 
     kr_pair = None
     if kr_ship and kr_ship.exists():
         kr = Afs.open(kr_ship)
-        kr_idx = {n.lower(): i for i, n in enumerate(kr.read_filename_toc())}
+        kr_idx = {n.lower(): i for i, n in enumerate(filename_toc(kr))}
         kr_pair = (kr, kr_idx)
         fhs["kr"] = kr_ship.open("rb")
 
     jp_pair = None
     if jp_ship and jp_ship.exists():
         jp = Afs.open(jp_ship)
-        jp_idx = {n.lower(): i for i, n in enumerate(jp.read_filename_toc())}
+        jp_idx = {n.lower(): i for i, n in enumerate(filename_toc(jp))}
         jp_pair = (jp, jp_idx)
         fhs["jp"] = jp_ship.open("rb")
 
