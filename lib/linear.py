@@ -32,12 +32,15 @@ it, USA-bigger overlays read short and the parser walks past the buffer.
 from __future__ import annotations
 
 import struct
+import sys
 import zlib
 from pathlib import Path
 
-from cri_afs import Afs, write_afs
+from cri_afs import Afs
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "lib"))
+from afs import finalize_hybrid_afs
 
 
 MANIFEST_NAME = "AFSLINEARFileIndex.idx"
@@ -123,30 +126,6 @@ USA_OVERLAY_NAMES = frozenset({
 })
 
 
-def build_manifest(entries: list[tuple[str, bytes]]) -> bytes:
-    """Build the LINEAR.AFS slot-0 manifest from entries' actual sizes.
-
-    Format (plaintext, CRLF-delimited, ASCII):
-
-      AFSLINEARFileIndex\\r\\n
-      0\\r\\n                      <- self-size placeholder
-      00000004\\r\\n                <- entry name, '.lin' stripped
-      45580\\r\\n                   <- entry size in decimal
-      00000008\\r\\n
-      1163178\\r\\n
-      ...
-    """
-    lines = [MANIFEST_HEADER, "0"]
-    for name, blob in entries:
-        if name == MANIFEST_NAME:
-            continue
-        # Strip .lin extension to match the original manifest convention
-        stem = name[:-4] if name.lower().endswith(".lin") else name
-        lines.append(stem)
-        lines.append(str(len(blob)))
-    return ("\r\n".join(lines) + "\r\n").encode("ascii")
-
-
 def build(out_path: Path | None = None,
           usa_linear: Path = ROOT / "work" / "usa" / "LINEAR.AFS",
           src_linear: Path | None = None,
@@ -201,19 +180,7 @@ def build(out_path: Path | None = None,
                 entries.append((name, src_blob))
                 kept_src_diff += 1
 
-    # Rebuild slot-0 manifest with the actual sizes we wrote.
-    assert entries[0][0] == MANIFEST_NAME, (
-        f"slot 0 should be {MANIFEST_NAME}, got {entries[0][0]}"
-    )
-    new_manifest = build_manifest(entries)
-    if verbose:
-        print(f"  manifest: source-region original {src.entries[0].size:,} B → "
-              f"rebuilt {len(new_manifest):,} B")
-    entries[0] = (MANIFEST_NAME, new_manifest)
-
-    src_meta = src.read_toc_metadata()
-
-    if verbose:
+    def _report() -> None:
         print(f"  source: {src_linear}")
         print(f"  total entries: {len(entries)}")
         for cls, n in swapped.items():
@@ -222,10 +189,13 @@ def build(out_path: Path | None = None,
         print(f"  kept source (identical between regions): {kept_src_same}")
         print(f"  source-only entries (no USA equivalent): {not_in_usa}")
 
-    write_afs(out_path, entries, toc_metadata=src_meta)
-    if verbose:
-        print(f"  wrote {out_path} ({out_path.stat().st_size:,} B)")
-    return out_path
+    # Rebuild slot-0 manifest with the actual sizes we wrote (same keystone
+    # trick as SHIP.AFS — see afs.py), then pass through the source TOC.
+    return finalize_hybrid_afs(
+        out_path, src, entries,
+        manifest_name=MANIFEST_NAME, header=MANIFEST_HEADER, strip_ext=".lin",
+        verbose=verbose, report=_report,
+    )
 
 
 if __name__ == "__main__":

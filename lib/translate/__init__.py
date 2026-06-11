@@ -26,16 +26,17 @@ only render latin-1 characters.
 from __future__ import annotations
 
 # Public API — keep stable for callers in lib/ship.py and patch.py.
-from ._common import CATALOG_DIR
-from .audit import ExtStatus, Issue, audit_all, format_status_table
-from .catalog import SUPPORTED_EXTS, extract_all
-from .celfid import extract_celfid_catalog, translated_celfid_bytes
-from .fpb import (build_fpb, extract_all_fpb, parse_fpb_raw, remap_windows,
-                  synthesize_implicit_seq0, translated_fpb_bytes)
-from .region import (REGION_OVERLAY_EXTS, extract_all_region, find_text_regions,
-                     translated_region_bytes)
-from .slot import (SLOT_FORMATS, build_slot_file, extract_all_slot,
-                   parse_slot_file, split_slot, translated_slot_bytes)
+from translate._common import CATALOG_DIR
+from translate.audit import ExtStatus, Issue, audit_all, format_status_table
+from translate.catalog import SUPPORTED_EXTS, extract_all
+from translate.celfid import (build_file_afs_with_celfid, extract_celfid_catalog,
+                              translated_celfid_bytes)
+from translate.fpb import (build_fpb, extract_all_fpb, parse_fpb_raw, remap_windows,
+                           synthesize_implicit_seq0, translated_fpb_bytes)
+from translate.region import (REGION_OVERLAY_EXTS, extract_all_region,
+                              find_text_regions, translated_region_bytes)
+from translate.slot import (SLOT_FORMATS, build_slot_file, extract_all_slot,
+                            parse_slot_file, split_slot, translated_slot_bytes)
 
 __all__ = [
     "CATALOG_DIR", "SUPPORTED_EXTS", "SLOT_FORMATS", "REGION_OVERLAY_EXTS",
@@ -46,4 +47,5 @@ __all__ = [
     "find_text_regions",
     "audit_all", "format_status_table", "ExtStatus", "Issue",
     "extract_celfid_catalog", "translated_celfid_bytes",
+    "build_file_afs_with_celfid",
 ]

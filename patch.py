@@ -61,21 +61,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "lib"))
 
-from cutscenes import dump_all_to_mkv, run_all as run_cutscenes
+from cutscenes import SUB_DIR_FOR, dump_all_to_mkv, run_all as run_cutscenes
 from ffmpeg import find_or_build_ffmpeg
 from iso import patch_iso
 from linear import build as build_linear
 from ship import build as build_ship
 from translate import (extract_all, CATALOG_DIR, audit_all, format_status_table,
-                       extract_celfid_catalog, translated_celfid_bytes)
-from cri_afs import Afs, write_afs
+                       extract_celfid_catalog, build_file_afs_with_celfid)
 
 DEFAULT_USA_ISO = ROOT / "roms" / "Magna Carta - Tears of Blood (USA).iso"
 DEFAULT_SOURCE_ISOS = {
     "kr": ROOT / "roms" / "Magna Carta - Jinhongui Seongheun (Korea).iso",
     "jp": ROOT / "roms" / "Magna Carta (Japan).iso",
 }
-SUBS_DIRS = {"kr": ROOT / "subs" / "korean", "jp": ROOT / "subs" / "japanese"}
 
 WORK = ROOT / "work"
 BUILD = ROOT / "build"
@@ -96,7 +94,7 @@ def _paths(source: str, hardsub: bool = True) -> dict[str, Path]:
         "src_linear": src_root / "LINEAR.AFS",
         "src_music": src_root / "MUSIC.AFS",
         "src_ship": src_root / "SHIP.AFS",
-        "subs_dir": SUBS_DIRS[source],
+        "subs_dir": SUB_DIR_FOR[source],
         "cutscenes_dir": BUILD / f"cutscenes-{source}{suffix}",
         "linear_hybrid": BUILD / f"{source}_base" / "LINEAR.AFS",
         "ship_hybrid": BUILD / f"{source}_base" / "SHIP.AFS",
@@ -113,6 +111,25 @@ def _ensure_extracted(iso: Path, dest: Path) -> None:
     subprocess.run(["7z", "x", "-y", f"-o{dest}", str(iso)], check=True)
 
 
+def _resolve_dir(arg: str) -> Path:
+    """Resolve a CLI directory argument relative to ROOT unless it's absolute."""
+    p = Path(arg)
+    return p if p.is_absolute() else ROOT / p
+
+
+def _require_usa_ship() -> Path:
+    """Return the extracted USA SHIP.AFS, exiting if `setup` hasn't run yet."""
+    usa = WORK / "usa" / "SHIP.AFS"
+    if not usa.exists():
+        sys.exit("USA SHIP.AFS missing — run `patch.py setup` first")
+    return usa
+
+
+def _use_hardsub(args: argparse.Namespace) -> bool:
+    """True unless --no-hardsub was passed (default: burn EN subs into video)."""
+    return not getattr(args, "no_hardsub", False)
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     p = _paths(args.source)
     _ensure_extracted(args.usa_iso, WORK / "usa")
@@ -124,7 +141,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
 
 def cmd_cutscenes(args: argparse.Namespace) -> int:
-    hardsub = not getattr(args, "no_hardsub", False)
+    hardsub = _use_hardsub(args)
     p = _paths(args.source, hardsub=hardsub)
     out = run_cutscenes(work_dir=p["cutscenes_dir"], src_root=p["src_root"],
                         subs_dir=p["subs_dir"], hardsub=hardsub)
@@ -134,14 +151,16 @@ def cmd_cutscenes(args: argparse.Namespace) -> int:
 
 
 def cmd_build_iso(args: argparse.Namespace) -> int:
-    hardsub = not getattr(args, "no_hardsub", False)
+    hardsub = _use_hardsub(args)
     p = _paths(args.source, hardsub=hardsub)
     replacements: dict[str, Path] = {}
 
     # Phase 1: cutscenes (re-encoded source video + audio with EN subs burned in)
     cutscene_dir = p["cutscenes_dir"]
     if cutscene_dir.exists():
-        for sub in cutscene_dir.iterdir():
+        # sorted(): relocation LBAs in iso.py are assigned in this order, so
+        # directory-listing order must not leak into the output ISO.
+        for sub in sorted(cutscene_dir.iterdir()):
             if not sub.is_dir():
                 continue
             candidate = sub / f"{sub.name}_undub.SFD"
@@ -158,11 +177,7 @@ def cmd_build_iso(args: argparse.Namespace) -> int:
 
     # Phase 3: build hybrid SHIP.AFS + hybrid LINEAR.AFS, then queue the AFS swaps
     tx_arg = getattr(args, "translations", None)
-    if tx_arg is None:
-        tx_dir = None
-    else:
-        # --translations (no value) → translations/   |  --translations PATH → PATH
-        tx_dir = ROOT / tx_arg if not Path(tx_arg).is_absolute() else Path(tx_arg)
+    tx_dir = _resolve_dir(tx_arg) if tx_arg is not None else None
     if tx_dir is not None:
         if not tx_dir.exists():
             sys.exit(f"--translations {tx_dir} doesn't exist — "
@@ -187,26 +202,15 @@ def cmd_build_iso(args: argparse.Namespace) -> int:
     # Phase 3b: if a celfid.lix translation catalog exists, rebuild FILE.AFS
     # with the patched celfid.lix (character names, item names, etc.).
     if tx_dir is not None and (tx_dir / "celfid.json").exists():
-        usa_file_afs = WORK / "usa" / "FILE.AFS"
-        new_celfid = translated_celfid_bytes(usa_file_afs,
-                                             tx_dir / "celfid.json")
-        if new_celfid is not None:
-            print(f"  Phase 3b: rebuilding FILE.AFS with patched celfid.lix")
-            afs = Afs.open(usa_file_afs)
-            names = afs.read_filename_toc()
-            md = afs.read_toc_metadata()
-            entries: list[tuple[str, bytes]] = []
-            with usa_file_afs.open("rb") as fh:
-                for i, name in enumerate(names):
-                    if name.lower() == "celfid.lix":
-                        entries.append((name, new_celfid))
-                    else:
-                        entries.append((name, afs.read_entry(i, fh)))
-            file_hybrid = BUILD / f"{args.source}_base" / "FILE.AFS"
-            file_hybrid.parent.mkdir(parents=True, exist_ok=True)
-            write_afs(file_hybrid, entries, toc_metadata=md)
+        file_hybrid = build_file_afs_with_celfid(
+            WORK / "usa" / "FILE.AFS",
+            BUILD / f"{args.source}_base" / "FILE.AFS",
+            tx_dir / "celfid.json",
+        )
+        if file_hybrid is not None:
             replacements["/FILE.AFS"] = file_hybrid
-            print(f"    wrote {file_hybrid} ({file_hybrid.stat().st_size:,}B)")
+            print(f"  Phase 3b: rebuilt FILE.AFS with patched celfid.lix "
+                  f"→ {file_hybrid} ({file_hybrid.stat().st_size:,}B)")
 
     print(f"\n  applying {len(replacements)} swaps to ISO ...")
     in_place, relocated = patch_iso(args.usa_iso, p["patched_iso"], replacements)
@@ -216,7 +220,7 @@ def cmd_build_iso(args: argparse.Namespace) -> int:
 
 
 def cmd_xdelta(args: argparse.Namespace) -> int:
-    hardsub = not getattr(args, "no_hardsub", False)
+    hardsub = _use_hardsub(args)
     p = _paths(args.source, hardsub=hardsub)
     if not p["patched_iso"].exists():
         sys.exit(f"run `patch.py build-iso --source {args.source}"
@@ -242,14 +246,11 @@ def cmd_translate_extract(args: argparse.Namespace) -> int:
     """Extract per-file translation catalogs from USA SHIP + celfid.lix in
     USA FILE.AFS, with KR/JP refs. Writes to ``translations/`` by default;
     pass ``--out`` to use a different directory (e.g. ``translations-deepl``)."""
-    out_arg = getattr(args, "out", None) or "translations"
-    out_dir = ROOT / out_arg if not Path(out_arg).is_absolute() else Path(out_arg)
+    out_dir = _resolve_dir(getattr(args, "out", None) or "translations")
 
-    usa = WORK / "usa" / "SHIP.AFS"
+    usa = _require_usa_ship()
     kr  = WORK / "kr"  / "SHIP.AFS"
     jp  = WORK / "jp"  / "SHIP.AFS"
-    if not usa.exists():
-        sys.exit("USA SHIP.AFS missing — run `patch.py setup` first")
     counts = extract_all(usa,
                          kr if kr.exists() else None,
                          jp if jp.exists() else None,
@@ -283,11 +284,8 @@ def cmd_translate_extract(args: argparse.Namespace) -> int:
 def cmd_translate_validate(args: argparse.Namespace) -> int:
     """Audit every JSON catalog under translations/ (or a custom dir).
     Prints issues with file:record precision and exits non-zero on errors."""
-    usa = WORK / "usa" / "SHIP.AFS"
-    if not usa.exists():
-        sys.exit("USA SHIP.AFS missing — run `patch.py setup` first")
-    cat_arg = getattr(args, "dir", None) or "translations"
-    cat_dir = ROOT / cat_arg if not Path(cat_arg).is_absolute() else Path(cat_arg)
+    usa = _require_usa_ship()
+    cat_dir = _resolve_dir(getattr(args, "dir", None) or "translations")
     if not cat_dir.exists():
         sys.exit(f"{cat_dir} missing — run `patch.py translate-extract --out {cat_dir.name}` first")
     usa_file = WORK / "usa" / "FILE.AFS"
@@ -306,11 +304,8 @@ def cmd_translate_validate(args: argparse.Namespace) -> int:
 
 def cmd_translate_status(args: argparse.Namespace) -> int:
     """Per-extension translation progress: how many records have been edited."""
-    usa = WORK / "usa" / "SHIP.AFS"
-    if not usa.exists():
-        sys.exit("USA SHIP.AFS missing — run `patch.py setup` first")
-    cat_arg = getattr(args, "dir", None) or "translations"
-    cat_dir = ROOT / cat_arg if not Path(cat_arg).is_absolute() else Path(cat_arg)
+    usa = _require_usa_ship()
+    cat_dir = _resolve_dir(getattr(args, "dir", None) or "translations")
     if not cat_dir.exists():
         sys.exit(f"{cat_dir} missing — run `patch.py translate-extract --out {cat_dir.name}` first")
     usa_file = WORK / "usa" / "FILE.AFS"

@@ -15,16 +15,18 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from cri_afs import Afs
 
-from ._common import CATALOG_DIR
-from .fpb import parse_fpb_raw, synthesize_implicit_seq0
-from .region import REGION_OVERLAY_EXTS, find_text_regions
-from .slot import SLOT_FORMATS, parse_slot_file, split_slot
+from translate._common import CATALOG_DIR
+from translate.celfid import _read_celfid, _string_at
+from translate.fpb import parse_fpb_raw, synthesize_implicit_seq0
+from translate.region import REGION_OVERLAY_EXTS, find_text_regions
+from translate.slot import SLOT_FORMATS, parse_slot_file, split_slot
 
 
 # Engine-meaningful tokens the translator must preserve byte-for-byte.
@@ -77,7 +79,6 @@ def _token_drop_warning(usa_en: str, cat_en: str) -> str | None:
     that USA had, else None. Tokens (``$n`` / ``$D<NN>``) are runtime
     instructions the engine consumes — dropping them breaks line wrap,
     portrait switches, voice timing, etc."""
-    from collections import Counter
     usa_tokens = Counter(_TOKEN_RE.findall(usa_en))
     cat_tokens = Counter(_TOKEN_RE.findall(cat_en))
     missing = []
@@ -350,8 +351,6 @@ def _audit_region(ext: str, catalog_path: Path, usa_blob: bytes,
 def _audit_celfid(catalog_path: Path, usa_file_afs: Path,
                   status: ExtStatus) -> list[Issue]:
     """Validate ``translations/celfid.json`` against USA's celfid.lix bytes."""
-    from .celfid import _read_celfid, _string_at  # local import to avoid cycles
-
     issues: list[Issue] = []
     try:
         cat = json.loads(catalog_path.read_text(encoding="utf-8"))

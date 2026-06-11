@@ -31,7 +31,7 @@ import struct
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from ._common import (CATALOG_DIR, decode_safe, encode_en, open_ship_handles)
+from translate._common import (CATALOG_DIR, decode_safe, encode_en, open_ship_handles)
 
 Window = tuple[int, int, int]  # (seq, offset, length)
 
@@ -129,8 +129,10 @@ def build_fpb(header16: bytes, windows: list[Window], data_section: bytes) -> by
         table += struct.pack("<III", seq, offset, length)
 
     # Patch the implicit seq=0 length to match the new layout. Equals the
-    # first explicit window's offset; 0 if no explicit windows exist.
-    implicit_seq0_len = windows[0][1] if windows else 0
+    # first explicit window's offset. With no explicit windows (single-record
+    # file) record 0 spans the whole data section — writing 0 here would make
+    # the engine render the record empty.
+    implicit_seq0_len = windows[0][1] if windows else len(data_section)
     header16 = (header16[:0x0C]
                 + struct.pack("<I", implicit_seq0_len)
                 + header16[0x10:])

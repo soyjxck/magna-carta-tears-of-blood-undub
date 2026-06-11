@@ -104,9 +104,17 @@ def _cache_stamp(job: "CutsceneJob", hardsub: bool) -> dict:
     }
 
 
-def _ffprobe_duration(path: Path) -> float:
+def _ffprobe_for(ffmpeg: Path) -> str:
+    """The ffprobe that ships beside the located/built ffmpeg. Using it keeps
+    us off a system ffprobe — the whole point of find_or_build_ffmpeg is to not
+    depend on one. Falls back to PATH only if no sibling exists."""
+    sibling = ffmpeg.parent / "ffprobe"
+    return str(sibling) if sibling.exists() else "ffprobe"
+
+
+def _ffprobe_duration(path: Path, ffprobe: str = "ffprobe") -> float:
     out = subprocess.check_output(
-        ["ffprobe", "-hide_banner", "-v", "error",
+        [ffprobe, "-hide_banner", "-v", "error",
          "-show_entries", "format=duration",
          "-of", "csv=p=0", str(path)]
     )
@@ -172,7 +180,8 @@ class CutsceneJob:
 
 def discover_jobs(usa_root: Path = ROOT / "work" / "usa",
                   src_root: Path = ROOT / "work" / "kr",
-                  subs_dir: Path = ROOT / "subs" / "korean") -> list[CutsceneJob]:
+                  subs_dir: Path = ROOT / "subs" / "korean",
+                  ffprobe: str = "ffprobe") -> list[CutsceneJob]:
     """Walk USA's MOVIE18/MOVIE99, pair each SFD with the same-named SFD
     in `src_root`, and pair each with a `<basename>.ass` under `subs_dir`."""
     jobs: list[CutsceneJob] = []
@@ -194,8 +203,8 @@ def discover_jobs(usa_root: Path = ROOT / "work" / "usa",
                 ass=ass if ass.exists() else None,
                 usa_size=usa.stat().st_size,
                 src_size=src.stat().st_size,
-                usa_dur=_ffprobe_duration(usa),
-                src_dur=_ffprobe_duration(src),
+                usa_dur=_ffprobe_duration(usa, ffprobe),
+                src_dur=_ffprobe_duration(src, ffprobe),
             ))
     return jobs
 
@@ -218,24 +227,33 @@ def build_cutscene(job: CutsceneJob, work_dir: Path, ffmpeg: Path,
     wd = work_dir / job.name
     wd.mkdir(parents=True, exist_ok=True)
     out = wd / f"{job.name}_undub.SFD"
+    # Build into a temp name and rename only on success — build-iso ships any
+    # *_undub.SFD that exists, so a crash mid-write must never leave a
+    # truncated file under the final name.
+    tmp = wd / f"{job.name}_undub.part.SFD"
 
-    if hardsub and job.has_subs:
-        m1v = wd / f"{job.name}.m1v"
-        sfa = wd / f"{job.name}.sfa"
-        # Audio swap only holds when USA and source are the same length;
-        # otherwise the swapped audio would drift, so demux normally.
-        swap = (job.name in AUDIO_SWAP_CUTSCENES
-                and abs(job.usa_dur - job.src_dur) < 1.0)
-        if swap:
-            _demux_sfd_via_ffmpeg(job.usa_sfd, m1v, wd / f"{job.name}.usa.sfa", ffmpeg)
-            _demux_sfd_via_ffmpeg(job.src_sfd, wd / f"{job.name}.src.m1v", sfa, ffmpeg)
+    try:
+        if hardsub and job.has_subs:
+            m1v = wd / f"{job.name}.m1v"
+            sfa = wd / f"{job.name}.sfa"
+            # Audio swap only holds when USA and source are the same length;
+            # otherwise the swapped audio would drift, so demux normally.
+            swap = (job.name in AUDIO_SWAP_CUTSCENES
+                    and abs(job.usa_dur - job.src_dur) < 1.0)
+            if swap:
+                _demux_sfd_via_ffmpeg(job.usa_sfd, m1v, wd / f"{job.name}.usa.sfa", ffmpeg)
+                _demux_sfd_via_ffmpeg(job.src_sfd, wd / f"{job.name}.src.m1v", sfa, ffmpeg)
+            else:
+                _demux_sfd_via_ffmpeg(job.src_sfd, m1v, sfa, ffmpeg)
+            subbed = wd / f"{job.name}_subbed.m1v"
+            _hardsub_video(m1v, subbed, job.ass, ffmpeg)
+            SofdecMuxer(subbed, sfa).write(tmp)
         else:
-            _demux_sfd_via_ffmpeg(job.src_sfd, m1v, sfa, ffmpeg)
-        subbed = wd / f"{job.name}_subbed.m1v"
-        _hardsub_video(m1v, subbed, job.ass, ffmpeg)
-        SofdecMuxer(subbed, sfa).write(out)
-    else:
-        shutil.copyfile(job.src_sfd, out)
+            shutil.copyfile(job.src_sfd, tmp)
+        tmp.replace(out)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     return out
 
 
@@ -259,8 +277,10 @@ def run_all(work_dir: Path = ROOT / "build" / "cutscenes-kr",
     Returns ``{iso_relative_path: built_sfd_path}`` of every patched cutscene.
     """
     ffmpeg = find_or_build_ffmpeg()
+    ffprobe = _ffprobe_for(ffmpeg)
     out: dict[str, Path] = {}
-    for job in discover_jobs(src_root=src_root, subs_dir=subs_dir):
+    failed: list[tuple[str, str]] = []
+    for job in discover_jobs(src_root=src_root, subs_dir=subs_dir, ffprobe=ffprobe):
         if job.name in KEEP_USA_CUTSCENES:
             if verbose:
                 print(f"  [keep USA] {job.rel}  (allow-listed)")
@@ -296,7 +316,15 @@ def run_all(work_dir: Path = ROOT / "build" / "cutscenes-kr",
                                                 hardsub=hardsub)
             stamp_path.write_text(json.dumps(expected_stamp, indent=2))
         except Exception as e:
+            failed.append((job.rel, str(e)))
             print(f"    ! failed: {e}")
+    if failed:
+        detail = "\n".join(f"    {rel}: {msg}" for rel, msg in failed)
+        raise RuntimeError(
+            f"{len(failed)} of {len(failed) + len(out)} cutscene(s) failed to "
+            f"build:\n{detail}\nThe ISO would otherwise ship these scenes with "
+            f"USA (English) audio — fix the inputs and re-run."
+        )
     return out
 
 

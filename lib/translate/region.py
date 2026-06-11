@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ._common import (CATALOG_DIR, decode_safe, encode_en, open_ship_handles)
+from translate._common import (CATALOG_DIR, decode_safe, encode_en, open_ship_handles)
 
 
 REGION_OVERLAY_EXTS = (".pod", ".tui", ".itm", ".abi", ".sgi", ".nod",

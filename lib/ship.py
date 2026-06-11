@@ -42,10 +42,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from cri_afs import Afs, write_afs
+from cri_afs import Afs
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
+from afs import finalize_hybrid_afs
 from translate import (SLOT_FORMATS, REGION_OVERLAY_EXTS,
                        translated_fpb_bytes, translated_slot_bytes,
                        translated_region_bytes)
@@ -84,33 +85,6 @@ SWAP_FPB = True
 
 
 MANIFEST_NAME = "AFSShipFileIndex.idx"
-
-
-def build_manifest(entries: list[tuple[str, bytes]]) -> bytes:
-    """Build the SHIP.AFS slot-0 manifest from entries' actual sizes.
-
-    Format (plaintext, CRLF-delimited, ASCII):
-
-      AFSShipFileIndex.idx\r\n
-      0\r\n                       <- manifest's own size (placeholder; the
-                                     engine reads this entry's real size
-                                     from the AFS primary TOC)
-      <name1>\r\n
-      <size1_in_decimal>\r\n
-      <name2>\r\n
-      <size2_in_decimal>\r\n
-      ...
-
-    Entries[0] is expected to be the manifest itself; the manifest's own
-    record at the top uses the placeholder "0" for size.
-    """
-    lines = [MANIFEST_NAME, "0"]
-    for name, blob in entries:
-        if name == MANIFEST_NAME:
-            continue
-        lines.append(name)
-        lines.append(str(len(blob)))
-    return ("\r\n".join(lines) + "\r\n").encode("ascii")
 
 
 def _pick_entry_blob(name: str, ext: str, usa_blob: bytes | None,
@@ -199,23 +173,7 @@ def build(out_path: Path | None = None,
             counts[kind] = counts.get(kind, 0) + 1
             entries.append((name, blob))
 
-    # Rebuild the slot-0 manifest with the actual sizes of bytes we wrote.
-    # This is the key step: without it, the engine uses the source region's
-    # manifest sizes and breaks on USA-bigger files.
-    new_manifest = build_manifest(entries)
-    assert entries[0][0] == MANIFEST_NAME, (
-        f"slot 0 should be {MANIFEST_NAME}, got {entries[0][0]}"
-    )
-    if verbose:
-        print(f"  manifest: source-region original {src.entries[0].size:,} B → "
-              f"rebuilt {len(new_manifest):,} B")
-    entries[0] = (MANIFEST_NAME, new_manifest)
-
-    # Pass through the source region's TOC metadata as-is — entry list/order
-    # is unchanged from the source base, so its 16-byte trailers still align.
-    src_meta = src.read_toc_metadata()
-
-    if verbose:
+    def _report() -> None:
         print(f"  source: {src_ship}")
         print(f"  total entries: {len(entries)}")
         print(f"  USA text overlays ({len(USA_TEXT_EXTS)} exts): "
@@ -230,10 +188,13 @@ def build(out_path: Path | None = None,
                 print(f"  {label}: {counts[kind]}")
         print(f"  kept source-region: {counts.get('kept_src', 0)}")
 
-    write_afs(out_path, entries, toc_metadata=src_meta)
-    if verbose:
-        print(f"  wrote {out_path} ({out_path.stat().st_size:,} B)")
-    return out_path
+    # Rebuild the slot-0 manifest with the hybrid's actual sizes (the keystone
+    # step — see afs.py), then pass through the source TOC and write.
+    return finalize_hybrid_afs(
+        out_path, src, entries,
+        manifest_name=MANIFEST_NAME, header=MANIFEST_NAME,
+        verbose=verbose, report=_report,
+    )
 
 
 if __name__ == "__main__":

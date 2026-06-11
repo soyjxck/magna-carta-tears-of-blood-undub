@@ -39,7 +39,8 @@ from typing import Iterable
 
 from cri_afs import Afs
 
-from ._common import CATALOG_DIR, decode_safe, encode_en
+from afs import rebuild_afs
+from translate._common import CATALOG_DIR, decode_safe, encode_en
 
 
 CHUNK_SIZE = 24576
@@ -337,9 +338,20 @@ def _patch_slot(out: bytearray, decomp: bytes, marker_hex: str,
             f"edited string {len(en_bytes)} bytes > cap {max_bytes - 1}. "
             f"Trim translation."
         )
-    out[slot_start:slot_start + max_bytes] = (
-        en_bytes + b"\x00" * (max_bytes - len(en_bytes))
-    )
+    # Don't trust the catalog's max_bytes: the write below replaces exactly
+    # that many bytes, so verify against the file that everything past the
+    # current string really is null padding — a stale or hand-edited
+    # max_bytes would otherwise clobber engine bytes after the slot.
+    end = slot_start + max_bytes
+    window = decomp[slot_start:end]
+    null_at = window.find(b"\x00")
+    if end > len(decomp) or null_at < 0 or window[null_at:].lstrip(b"\x00"):
+        raise ValueError(
+            f"celfid.lix slot (marker {marker_hex[:16]}...): catalog "
+            f"max_bytes {max_bytes} overruns the slot's real padding — "
+            f"refusing to overwrite engine bytes. Re-extract the catalog."
+        )
+    out[slot_start:end] = en_bytes + b"\x00" * (max_bytes - len(en_bytes))
     return True
 
 
@@ -402,9 +414,8 @@ def translated_celfid_bytes(usa_file_afs: Path,
             if idx >= 0:
                 full, _ = _string_at(decomp, idx + len(marker), encoding="latin-1")
                 # Replace {base} with regex-friendly capture
-                import re as _re
-                rx = _re.escape(tmpl).replace(r"\{base\}", "(.+)")
-                m = _re.fullmatch(rx, full)
+                rx = re.escape(tmpl).replace(r"\{base\}", "(.+)")
+                m = re.fullmatch(rx, full)
                 if m:
                     usa_base = m.group(1)
 
@@ -438,3 +449,18 @@ def translated_celfid_bytes(usa_file_afs: Path,
     if not any_edit:
         return None
     return recompress_chunked(bytes(out))
+
+
+def build_file_afs_with_celfid(usa_file_afs: Path, out_path: Path,
+                               catalog_path: Path | None = None
+                               ) -> Path | None:
+    """Rebuild FILE.AFS with a celfid.lix patched from the catalog.
+
+    Returns the written `out_path`, or None when there's no catalog or no
+    slot needed editing — in which case the caller should leave the USA
+    FILE.AFS in place. Every other FILE.AFS entry passes through unchanged.
+    """
+    new_celfid = translated_celfid_bytes(usa_file_afs, catalog_path)
+    if new_celfid is None:
+        return None
+    return rebuild_afs(usa_file_afs, out_path, {"celfid.lix": new_celfid})
