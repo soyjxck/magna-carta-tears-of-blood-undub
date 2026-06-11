@@ -26,8 +26,3 @@ strict = true
 mypy_path = "lib"
 files = ["patch.py", "lib"]
 exclude = ['^lib/experiments/', '^\.tmp/']
-
-# External package without a py.typed marker.
-[[tool.mypy.overrides]]
-module = ["sfd_muxer", "sfd_muxer.*"]
-ignore_missing_imports = true
