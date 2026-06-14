@@ -29,3 +29,12 @@ translations-*/
 
 # Local-only — incomplete notes / one-off rebuild backups.
 build_old/
+
+# Transient build logs + scratch.
+*.log
+.tmp/
+
+# Local-only analysis notes — kept on disk for reference, not published.
+TRANSLATION-REVIEW.md
+FAITHFUL-VS-BASE.md
+FAITHFUL-VS-BASE.csv

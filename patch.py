@@ -41,9 +41,12 @@ Subcommands
   translate-status   Per-extension progress table: how many records are
                      edited vs untouched. See TRANSLATING.md.
 
-  dump-mkv           Dump KR or JP cutscenes to MKV files for review,
-                     optionally with English subs hardsubbed via libass.
-                     Output: build/cutscene-dumps/<region>[-hardsub]/.
+  dump-mkv           Dump cutscenes to MKV for review. Default: each
+                     region's RAW original cutscenes (usa/kr/jp), no subs.
+                     With --patched: the UNDUB cutscenes that ship in the
+                     patched ISO (built undub SFDs + USA-kept slots; subs and
+                     the English-credit swap already baked in), kr/jp only.
+                     Output: build/cutscene-dumps/<region>[-patched]/.
 
 Source region (--source kr | jp; default kr) selects which region's voice +
 scene data is used for the undub. Inputs:
@@ -246,10 +249,10 @@ def cmd_xdelta(args: argparse.Namespace) -> int:
 
 
 def cmd_dump_mkv(args: argparse.Namespace) -> int:
-    """Dump KR / JP cutscenes as MKV files. Optionally burn English
-    subs into the video via libass (hardsub)."""
+    """Dump cutscenes as MKV files — each region's raw originals, or the
+    patched undub cutscenes from the build outputs (``--patched``)."""
     regions = tuple(r.strip() for r in args.regions.split(",") if r.strip())
-    return dump_all_to_mkv(regions=regions, hardsub=args.hardsub, jobs=args.jobs)
+    return dump_all_to_mkv(regions=regions, patched=args.patched, jobs=args.jobs)
 
 
 def cmd_translate_extract(args: argparse.Namespace) -> int:
@@ -388,11 +391,12 @@ def main() -> int:
                     help="catalog directory (default: 'translations')")
     ts.set_defaults(func=cmd_translate_status)
     dm = sub.add_parser("dump-mkv",
-                        help="dump KR/JP cutscenes as MKV (optional --hardsub)")
-    dm.add_argument("--regions", default="kr,jp",
-                    help="comma-separated subset of {usa,kr,jp} (default: kr,jp)")
-    dm.add_argument("--hardsub", action="store_true",
-                    help="burn English subs from subs/{korean,japanese}/ into the video")
+                        help="dump cutscenes as MKV: raw region originals, or --patched undub")
+    dm.add_argument("--regions", default="usa,kr,jp",
+                    help="comma-separated subset of {usa,kr,jp} (default: usa,kr,jp)")
+    dm.add_argument("--patched", action="store_true",
+                    help="dump the patched undub cutscenes (from build outputs) instead of "
+                         "raw source; kr/jp only, needs a prior `cutscenes` build")
     dm.add_argument("--jobs", type=int, default=4,
                     help="parallel ffmpeg processes (default: 4)")
     dm.set_defaults(func=cmd_dump_mkv)

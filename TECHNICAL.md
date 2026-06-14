@@ -738,28 +738,35 @@ that don't affect playback:
 Both differences are inert — the engine reads streams by start codes
 and uses each PES's own PTS/DTS for sync, not the pack-head SCR.
 
-### Special case: `189992` ending credits (KR patch)
+### Special case: `189992` ending credits (both patches)
 
 `189992` is the ending credit roll: the **video** is a scrolling credits
 sequence with baked-in staff + song credits, and the **audio** is the
 ending song. The normal pipeline would replace the whole thing with the
-source-region (KR) version — but USA's credit roll is already in English
-and worth keeping. So `189992` is handled by an **audio swap** instead of
-a full source-region demux (`AUDIO_SWAP_CUTSCENES = {"189992"}` in
+source-region version — but USA's credit roll is already in English and
+worth keeping. So `189992` is handled by an **audio swap** instead of a
+full source-region demux (`AUDIO_SWAP_CUTSCENES = {"189992"}` in
 `lib/cutscenes.py`):
 
 1. Demux the **USA** SFD → keep its MPEG-1 video (the English credit roll).
-2. Demux the **source (KR)** SFD → take only its ADX audio (the Korean song).
-3. Hardsub the USA video with `subs/korean/189992.ass` (GXZ95's English
-   song credits + lyrics) via libass.
-4. Mux subbed USA video + KR audio → output SFD.
+2. Demux the **source** SFD → take only its ADX audio (the ending song).
+3. If the source song is longer than the USA roll, time-stretch the USA
+   video (`setpts=PTS*src_dur/usa_dur`) so the roll and song finish
+   together — no freeze, no cut.
+4. Hardsub the (stretched) USA video with `subs/<region>/189992.ass` when
+   one exists, via libass.
+5. Mux video + source audio → output SFD.
 
-The swap is gated on `abs(usa_dur - src_dur) < 1.0`: it only fires when the
-two regions' cutscenes line up. KR's `189992` matches USA (~263.86 s) so the
-swap fires; **JP's differs in length, fails the gate, and falls back to the
-normal source-region pipeline — so this credits fix is KR-only.**
+**Per-region result.** KR's credit roll matches USA's length (~263.86 s),
+so no stretch is needed; it ships GXZ95's English song credits + lyrics
+burned in (see masking below). JP's roll runs ~68 s longer (~331.9 s), so
+the English roll is stretched ~1.26× to match the Japanese song; there is
+no `subs/japanese/189992.ass`, so the JP credits carry no subtitles.
+(Earlier versions gated the swap on `abs(usa_dur - src_dur) < 1.0` and fell
+back to the source roll for JP — the stretch replaces that fallback so both
+patches now show the English credit roll.)
 
-**Masking the baked credits.** GXZ95's English song-credit overlays are
+**Masking the baked credits (KR).** GXZ95's English song-credit overlays are
 narrower than the baked USA credit text they sit on top of, so the wider
 baked text leaks out past the edges of each overlay line. The fix is burned
 into the `.ass`: seven full-width opaque-black `\p1` vector rectangles, one
@@ -984,7 +991,7 @@ patch.py full         # setup + cutscenes + build-iso + xdelta
 
 Region selected by `--source kr` or `--source jp`. Defaults to `kr`.
 
-The English subtitle `.ass` files in `subs/korean/` are committed to the repo and burned into the KR cutscenes; `subs/japanese/` is a work in progress. Rebuilds don't re-run any transcription.
+The English subtitle `.ass` files in `subs/korean/` and `subs/japanese/` are committed to the repo and burned into the KR and JP cutscenes respectively. Rebuilds don't re-run any transcription.
 
 Apply with: `xdelta3 -d -s 'Magna Carta - Tears of Blood (USA).iso' magna-carta-tears-of-blood-undub-<source>.xdelta out.iso`
 
@@ -1003,7 +1010,7 @@ Apply with: `xdelta3 -d -s 'Magna Carta - Tears of Blood (USA).iso' magna-carta-
 | `lib/ffmpeg.py` | Auto-builds ffmpeg with libass if not present. |
 | `lib/experiments/` | Diagnostic scripts (gitignored). `analyze_lin.py` decompresses `.lin` files and dumps UE2 package structure. |
 | `sfd-muxer` (PyPI) | Pure-Python SofDec MPEG-PS muxer/demuxer. Elementary streams round-trip byte-identically; container has minor differences vs original SFDs (see [Round-trip notes](#round-trip-notes-for-sfd-muxer)). [PyPI](https://pypi.org/project/sfd-muxer/) · [Repo](https://github.com/soyjxck/sfd-muxer). |
-| `subs/korean/*.ass`, `subs/japanese/*.ass` | English subtitle files for cutscene burn-in (KR; JP work in progress). |
+| `subs/korean/*.ass`, `subs/japanese/*.ass` | English subtitle files for cutscene burn-in (both regions). |
 
 ---
 

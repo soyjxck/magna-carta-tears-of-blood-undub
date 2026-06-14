@@ -53,14 +53,14 @@ KEEP_USA_CUTSCENES = frozenset({
 })
 
 # Cutscene(s) where we keep USA's *video* (its baked-in English credit
-# roll) but mux the source-region *audio* underneath, then burn subs on
-# top. The ending credits (189992) want the English credit names on
-# screen, the original-language ending song in the audio, and English
-# lyric subs. Only safe when USA and source share a duration so the audio
-# stays aligned — build_cutscene falls back to the normal source-region
-# demux when they don't (e.g. JP's 189992 is a different, longer roll).
+# roll) but mux the source-region *audio* underneath, burning subs on top
+# when an `.ass` exists. The ending credits (189992) want the English
+# credit names on screen plus the original-language ending song. When the
+# USA roll is shorter than the source song (e.g. JP's 189992 is a longer
+# roll), build_cutscene time-stretches the USA video to the source song's
+# length so the roll and song finish together — no freeze, no cut.
 AUDIO_SWAP_CUTSCENES = frozenset({
-    "189992",  # ending credits — USA English roll + source song + lyric subs
+    "189992",  # ending credits — USA English roll + source song (+ lyric subs if present)
 })
 
 SUB_DIR_FOR = {"kr": ROOT / "subs" / "korean",
@@ -133,13 +133,21 @@ def _demux_sfd_via_ffmpeg(sfd: Path, m1v: Path, sfa: Path, ffmpeg: Path) -> None
     )
 
 
-def _hardsub_video(m1v_in: Path, m1v_out: Path, ass: Path, ffmpeg: Path,
-                   kbps: int = DEFAULT_VIDEO_KBPS) -> None:
-    """Re-encode `m1v_in` with `ass` burned in via libass, fixed CBR mpeg1video."""
+def _hardsub_video(m1v_in: Path, m1v_out: Path, ass: Path | None, ffmpeg: Path,
+                   kbps: int = DEFAULT_VIDEO_KBPS, stretch: float = 1.0) -> None:
+    """Re-encode `m1v_in` as fixed-CBR mpeg1video. Burns `ass` via libass when
+    given, and time-stretches the picture by `stretch` (a PTS factor > 1 slows
+    it down) so an English credit roll can be matched to a longer source song."""
+    filters = []
+    if abs(stretch - 1.0) > 1e-3:
+        filters.append(f"setpts=PTS*{stretch:.6f}")
+    if ass is not None:
+        filters.append(f"ass={ass}")
+    vf = ",".join(filters) if filters else "null"
     subprocess.run(
         [str(ffmpeg), "-y", "-hide_banner", "-loglevel", "warning",
          "-i", str(m1v_in),
-         "-vf", f"ass={ass}",
+         "-vf", vf,
          "-c:v", "mpeg1video",
          "-b:v", f"{kbps}k",
          "-minrate", f"{kbps}k",
@@ -215,10 +223,10 @@ def build_cutscene(job: CutsceneJob, work_dir: Path, ffmpeg: Path,
     """Produce the undub SFD for one cutscene. Returns the output path.
 
     Three paths:
-      * audio swap (name in ``AUDIO_SWAP_CUTSCENES``, subs present, and
-        the regions share a duration) — keep USA's video for its baked-in
-        English text, take the source-region audio, burn the `.ass` in,
-        re-mux to SofDec.
+      * audio swap (name in ``AUDIO_SWAP_CUTSCENES``) — keep USA's video
+        for its baked-in English text, take the source-region audio, burn
+        the `.ass` in when one exists, time-stretch the video to the source
+        song's length when the durations differ, then re-mux to SofDec.
       * subs to burn (``hardsub`` and the job has dialog) — demux the
         source SFD, burn the `.ass` in via libass, re-mux to SofDec.
       * no subs — copy the source SFD verbatim. It is CRI's own
@@ -234,21 +242,25 @@ def build_cutscene(job: CutsceneJob, work_dir: Path, ffmpeg: Path,
     tmp = wd / f"{job.name}_undub.part.SFD"
 
     try:
-        if hardsub and job.has_subs:
+        # Audio-swap scenes keep USA's English video over the source-region
+        # audio even with no subs (e.g. JP credits). When USA's video is
+        # shorter than the source song, stretch it to match so the roll and
+        # song finish together instead of drifting/cutting.
+        do_swap = hardsub and job.name in AUDIO_SWAP_CUTSCENES
+        if hardsub and (job.has_subs or do_swap):
             m1v = wd / f"{job.name}.m1v"
             sfa = wd / f"{job.name}.sfa"
-            # Audio swap only holds when USA and source are the same length;
-            # otherwise the swapped audio would drift, so demux normally.
-            swap = (job.name in AUDIO_SWAP_CUTSCENES
-                    and abs(job.usa_dur - job.src_dur) < 1.0)
-            if swap:
+            stretch = 1.0
+            if do_swap:
                 _demux_sfd_via_ffmpeg(job.usa_sfd, m1v, wd / f"{job.name}.usa.sfa", ffmpeg)
                 _demux_sfd_via_ffmpeg(job.src_sfd, wd / f"{job.name}.src.m1v", sfa, ffmpeg)
+                if job.usa_dur and abs(job.usa_dur - job.src_dur) > 1.0:
+                    stretch = job.src_dur / job.usa_dur
             else:
                 _demux_sfd_via_ffmpeg(job.src_sfd, m1v, sfa, ffmpeg)
             subbed = wd / f"{job.name}_subbed.m1v"
-            assert job.ass is not None  # guarded by job.has_subs above
-            _hardsub_video(m1v, subbed, job.ass, ffmpeg)
+            _hardsub_video(m1v, subbed, job.ass if job.has_subs else None,
+                           ffmpeg, stretch=stretch)
             SofdecMuxer(subbed, sfa).write(tmp)
         else:
             shutil.copyfile(job.src_sfd, tmp)
@@ -419,62 +431,82 @@ def dump_sfd_to_mkv(sfd_path: Path, out_mkv: Path, ass: Path | None,
         return _mux_to_mkv(m1v, adx, out_mkv, ffmpeg)
 
 
-def dump_all_to_mkv(regions: tuple[str, ...] = ("kr", "jp"),
-                    hardsub: bool = False,
+def dump_all_to_mkv(regions: tuple[str, ...] = ("usa", "kr", "jp"),
+                    patched: bool = False,
                     out_root: Path = ROOT / "build" / "cutscene-dumps",
                     jobs: int = 4,
                     verbose: bool = True) -> int:
-    """Dump USA, KR and/or JP cutscenes as MKV under
-    ``<out_root>/<region>[-hardsub]/<MOVIE18|MOVIE99>/<basename>.mkv``.
+    """Dump cutscenes to MKV for review, in one of two modes.
 
-    With ``hardsub=True``, English subs from ``subs/{korean,japanese}/``
-    are burned into the chosen region's video. USA is the English base and
-    always dumps raw (no subtitle dir, ``hardsub`` ignored).
+    raw (default)
+        Each region's ORIGINAL cutscenes, straight from ``work/<region>``
+        (usa/kr/jp), with no subtitles — a faithful rip of the untouched
+        source ISOs. Output: ``<out_root>/<region>/``.
+
+    patched (``patched=True``)
+        The UNDUB cutscenes that actually ship in the patched ISO,
+        reconstructed from the build outputs: per scene, the built undub
+        SFD (``build/cutscenes-<region>/<name>/<name>_undub.SFD``) when one
+        exists, else USA's original SFD (the slots ``build-iso`` leaves
+        untouched). English subs and the English-credit swap/stretch are
+        already baked into those SFDs, so this is a pure remux — it can't
+        drift from the ISO. Only the source regions (kr/jp) have patched
+        builds. Output: ``<out_root>/<region>-patched/``.
     """
     ffmpeg = find_or_build_ffmpeg()
+    usa_root = ROOT / "work" / "usa"
 
-    queued: list[tuple[Path, Path, Path | None]] = []
+    queued: list[tuple[Path, Path]] = []
     for region in regions:
         if region not in DUMPABLE_REGIONS:
             if verbose:
-                print(f"  [skip] {region}: not a dumpable region "
-                      f"(use usa, kr, or jp)")
+                print(f"  [skip] {region}: not a dumpable region (use usa, kr, or jp)")
             continue
-        region_root = ROOT / "work" / region
-        if not region_root.is_dir():
-            if verbose:
-                print(f"  [skip region] {region} not extracted")
-            continue
-        # USA is the English base — there are no subs to burn, so it always
-        # dumps raw regardless of the hardsub flag.
-        use_subs = hardsub and region in SUB_DIR_FOR
-        out_region = out_root / (f"{region}-hardsub" if use_subs else region)
-        ass_dir = SUB_DIR_FOR[region] if use_subs else None
-        for sub in ("MOVIE18", "MOVIE99"):
-            for sfd in sorted((region_root / sub).glob("*.SFD")):
-                ass = (ass_dir / f"{sfd.stem}.ass") if ass_dir else None
-                out_mkv = out_region / sub / f"{sfd.stem}.mkv"
-                queued.append((sfd, out_mkv, ass))
+        if patched:
+            if region == "usa":
+                if verbose:
+                    print("  [skip] usa has no patched build (it is the English base)")
+                continue
+            built_dir = ROOT / "build" / f"cutscenes-{region}"
+            if not built_dir.is_dir():
+                if verbose:
+                    print(f"  [skip region] {region}: no patched build — "
+                          f"run `patch.py --source {region} cutscenes` first")
+                continue
+            out_region = out_root / f"{region}-patched"
+            for sub in ("MOVIE18", "MOVIE99"):
+                for usa_sfd in sorted((usa_root / sub).glob("*.SFD")):
+                    name = usa_sfd.stem
+                    built = built_dir / name / f"{name}_undub.SFD"
+                    src = built if built.exists() else usa_sfd
+                    queued.append((src, out_region / sub / f"{name}.mkv"))
+        else:
+            region_root = ROOT / "work" / region
+            if not region_root.is_dir():
+                if verbose:
+                    print(f"  [skip region] {region} not extracted")
+                continue
+            out_region = out_root / region
+            for sub in ("MOVIE18", "MOVIE99"):
+                for sfd in sorted((region_root / sub).glob("*.SFD")):
+                    queued.append((sfd, out_region / sub / f"{sfd.stem}.mkv"))
 
     if verbose:
-        kind = "hardsubbed" if hardsub else "raw"
-        print(f"queued {len(queued)} cutscene remuxes ({kind}) "
-              f"across {len(regions)} regions")
+        kind = "patched undub" if patched else "raw original"
+        print(f"queued {len(queued)} cutscene remuxes ({kind})")
     out_root.mkdir(parents=True, exist_ok=True)
 
     ok = 0
     failed: list[tuple[Path, str]] = []
     with cf.ThreadPoolExecutor(max_workers=jobs) as ex:
-        futs = {ex.submit(dump_sfd_to_mkv, sfd, out, ass, ffmpeg): (sfd, out)
-                for sfd, out, ass in queued}
+        futs = {ex.submit(dump_sfd_to_mkv, sfd, out, None, ffmpeg): (sfd, out)
+                for sfd, out in queued}
         for i, fut in enumerate(cf.as_completed(futs), 1):
             success, msg = fut.result()
             sfd, out_mkv = futs[fut]
             tag = "✓" if success else "✗"
             if verbose:
-                rel_in = sfd.relative_to(ROOT / "work")
-                rel_out = out_mkv.relative_to(out_root)
-                print(f"  [{i:>3}/{len(queued)}] {tag} {rel_in} -> {rel_out}  ({msg})")
+                print(f"  [{i:>3}/{len(queued)}] {tag} {out_mkv.relative_to(out_root)}  ({msg})")
             if success:
                 ok += 1
             else:

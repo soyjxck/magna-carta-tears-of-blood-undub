@@ -1,13 +1,6 @@
-# Magna Carta: Tears of Blood — Undub Patch (Alpha)
+# Magna Carta: Tears of Blood — Undub Patch
 
-> ⚠️ **Pre-alpha.** Both regional patches boot and play through the early
-> game in PCSX2 testing, but the patch hasn't been clear-flagged on a full
-> playthrough yet. **The retranslation pipeline (Option 3 below) is
-> especially alpha** — the catalog format and rebuild semantics may change
-> as edge cases surface. File issues for any boot crashes, scene hangs, or
-> rendering glitches you hit.
-
-Restores the original Korean **or** Japanese voice acting in the USA PS2 release of *Magna Carta: Tears of Blood* (SLUS-21221). Two separate xdelta patches — pick whichever VO you prefer. Cutscenes use the source region's audio; in-game dialog runs from the source region's audio archive while the UI / item / dialog text stays English. The Korean patch has English subtitles (by GXZ95) burned into the cutscenes; the Japanese patch does not currently have cutscene subtitles.
+Restores the original Korean **or** Japanese voice acting in the USA PS2 release of *Magna Carta: Tears of Blood* (SLUS-21221). Two separate xdelta patches — pick whichever VO you prefer. Cutscenes use the source region's audio; in-game dialog runs from the source region's audio archive while the UI / item / dialog text stays English. Both patches have English subtitles (by GXZ95) burned into the cutscenes — the Japanese subtitles mirror the Korean translation line-for-line across every dialogue cutscene (the opening song and end-credits roll are left unsubtitled on the JP patch).
 
 If this helped you, consider [buying me a coffee](https://ko-fi.com/soyjack)
 
@@ -65,9 +58,9 @@ python3 patch.py --source kr xdelta      # build/magna-carta-tears-of-blood-undu
 # (replace --source kr with --source jp for the Japanese variant)
 ```
 
-The `subs/korean/` directory ships the complete set of English `.ass` subtitle files burned into the KR cutscenes (`subs/japanese/` is still a work in progress). They're committed to the repo; rebuilding from scratch doesn't re-run any transcription.
+The `subs/korean/` and `subs/japanese/` directories ship the complete sets of English `.ass` subtitle files burned into the KR and JP cutscenes. They're committed to the repo; rebuilding from scratch doesn't re-run any transcription.
 
-### Option 3 — Re-translate with custom English  *(alpha)*
+### Option 3 — Re-translate with custom English  *(experimental)*
 
 > ⚠️ **Experimental.** This pipeline lets you replace ATLUS USA's English with your own translation, but the catalog format and rebuild semantics aren't frozen yet. Round-trip is byte-identical for unedited catalogs (verified on 995 files), and edits work end-to-end on the formats covered, but format-specific edge cases will keep surfacing as people use it. Don't expect catalog files written today to be readable by future builds without migration. Test in-game before committing time to bulk re-translation work.
 
@@ -89,15 +82,14 @@ Cutscene subtitles work directly: edit the `.ass` files in `subs/{korean,japanes
 
 ### Bonus — dump cutscenes as MKV
 
-Useful for previewing the source-region cutscenes outside the game (with or without burned-in English subs).
+Preview cutscenes outside the game — either each region's raw originals, or the patched undub cutscenes (exactly what ships in the ISO, with English subs and the English credit roll baked in).
 
 ```bash
-python3 patch.py dump-mkv --regions kr,jp                # raw remuxes
-python3 patch.py dump-mkv --regions kr --hardsub          # KR video + EN subs burned in
-python3 patch.py dump-mkv --regions jp --hardsub          # JP video + EN subs burned in
+python3 patch.py dump-mkv --regions usa,kr,jp           # raw region originals
+python3 patch.py dump-mkv --patched --regions kr,jp     # the patched undub cutscenes
 ```
 
-Output lands at `build/cutscene-dumps/<region>[-hardsub]/`.
+Raw dumps land at `build/cutscene-dumps/<region>/`; patched dumps at `build/cutscene-dumps/<region>-patched/`. The patched dump is remuxed straight from the built cutscene SFDs, so it always matches the ISO.
 
 ## How It Works (TL;DR)
 
@@ -105,7 +97,7 @@ The game is built on Unreal Engine 2 with CRI's AFS archive format and SofDec MP
 
 The keystone discovery: SHIP.AFS slot 0 is a plaintext `(filename, decimal-size)` manifest the engine reads at boot to populate its file-size cache. When we swap USA bytes in but leave the manifest pointing at source-region sizes, the engine reads short and the parser overruns its buffer. Rebuilding the manifest with the hybrid's actual sizes is the fix that unlocks full English coverage on the world dialog (`.fpb`) and every other text format. The same trick applies to LINEAR.AFS for the texture overlay.
 
-Cutscenes use [`sfd-muxer`](https://github.com/soyjxck/sfd-muxer) — we demux source SFDs, re-encode video at 5500 kbps CBR with English subtitles (pre-shipped in `subs/`) burned in via libass, then mux back to a fresh SFD. The ending-credits cutscene (`189992`) is special-cased on the KR patch: it keeps the USA English credit-roll video and swaps in only the Korean ending-song audio, with GXZ95's English song credits + lyrics burned over masked-out baked text. See [TECHNICAL.md](TECHNICAL.md#cutscene-sfds) for the mask technique.
+Cutscenes use [`sfd-muxer`](https://github.com/soyjxck/sfd-muxer) — we demux source SFDs, re-encode video at 5500 kbps CBR with English subtitles (pre-shipped in `subs/`) burned in via libass, then mux back to a fresh SFD. The ending-credits cutscene (`189992`) keeps the USA English credit-roll video on **both** patches and swaps in the source-region ending song. On the KR patch it carries GXZ95's English song credits + lyrics burned over masked-out baked text; on the JP patch (whose credit roll runs ~68 s longer) the English roll is time-stretched to match the Japanese song, with no subtitles. See [TECHNICAL.md](TECHNICAL.md#cutscene-sfds) for details.
 
 Full reverse-engineering record in [TECHNICAL.md](TECHNICAL.md).
 
@@ -132,7 +124,7 @@ work/                     # extracted ISO trees (gitignored)
 build/                    # output ISO + xdelta + cutscenes + MKV dumps (gitignored)
 subs/
   korean/                 # English .ass subs burned in when --source kr
-  japanese/               # JP cutscene subs (work in progress)
+  japanese/               # English .ass subs burned in when --source jp
 translations/             # per-file translation catalogs (gitignored)
 ```
 
