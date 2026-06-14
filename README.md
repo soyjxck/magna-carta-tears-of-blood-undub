@@ -1,6 +1,6 @@
 # Magna Carta: Tears of Blood — Undub Patch
 
-Restores the original Korean **or** Japanese voice acting in the USA PS2 release of *Magna Carta: Tears of Blood* (SLUS-21221). Two separate xdelta patches — pick whichever VO you prefer. Cutscenes use the source region's audio; in-game dialog runs from the source region's audio archive while the UI / item / dialog text stays English. Both patches have English subtitles (by GXZ95) burned into the cutscenes — the Japanese subtitles mirror the Korean translation line-for-line across every dialogue cutscene (the opening song and end-credits roll are left unsubtitled on the JP patch).
+Restores the original Korean **or** Japanese voice acting in the USA PS2 release of *Magna Carta: Tears of Blood* (SLUS-21221). Two separate xdelta patches — pick whichever VO you prefer. Cutscenes use the source region's audio; in-game dialog runs from the source region's audio archive while the UI / item / dialog text stays English. Both patches have English subtitles (by GXZ95) burned into the cutscenes — the Japanese subtitles mirror the Korean translation line-for-line across every dialogue cutscene.
 
 If this helped you, consider [buying me a coffee](https://ko-fi.com/soyjack)
 
@@ -90,6 +90,11 @@ python3 patch.py dump-mkv --patched --regions kr,jp     # the patched undub cuts
 ```
 
 Raw dumps land at `build/cutscene-dumps/<region>/`; patched dumps at `build/cutscene-dumps/<region>-patched/`. The patched dump is remuxed straight from the built cutscene SFDs, so it always matches the ISO.
+
+## Known issues / to do
+
+- The Japanese patch's opening song and end-credits roll aren't subtitled yet — the credits play the English staff roll without song lyrics.
+- A few cutscene lines that exist only in the Japanese cut (not in the Korean script) currently play without an English subtitle; translating those is on the to-do list.
 
 ## How It Works (TL;DR)
 
