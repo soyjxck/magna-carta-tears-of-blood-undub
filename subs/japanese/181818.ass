@@ -15,8 +15,8 @@ Video File: 181818.mkv
 Video AR Mode: 4
 Video AR Value: 1.660440
 Video Zoom Percent: 1.125000
-Active Line: 11
-Video Position: 3608
+Active Line: 12
+Video Position: 3783
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
@@ -27,3 +27,16 @@ Style: Nanum Barun Gothic,NanumBarunGothic,20,&H00C0E8F8,&H000000FF,&H00000000,&
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:13.94,0:00:20.85,Nanum Barun Gothic,,0,0,0,,I have already lost everything
+Dialogue: 0,0:00:20.85,0:00:30.69,Nanum Barun Gothic,,0,0,0,,Now I just wander with no destination
+Dialogue: 0,0:00:30.69,0:00:37.13,Nanum Barun Gothic,,0,0,0,,But when I close my eyes, it comes back to me
+Dialogue: 0,0:00:37.13,0:00:46.41,Nanum Barun Gothic,,0,0,0,,The promise I exchanged, with you on that day
+Dialogue: 0,0:00:46.41,0:00:56.12,Nanum Barun Gothic,,0,0,0,,I can fly again, into the endless sky
+Dialogue: 0,0:00:56.12,0:01:01.12,Nanum Barun Gothic,,0,0,0,,It shines just as brightly today
+Dialogue: 0,0:01:01.12,0:01:11.00,Nanum Barun Gothic,,0,0,0,,Because back then, I believed only in the future
+Dialogue: 0,0:01:31.02,0:01:40.73,Nanum Barun Gothic,,0,0,0,,Now all alone, I clasp my hands together
+Dialogue: 0,0:01:40.73,0:01:45.70,Nanum Barun Gothic,,0,0,0,,Let me offer a prayer
+Dialogue: 0,0:01:45.70,0:01:52.47,Nanum Barun Gothic,,0,0,0,,To this world that has become terribly stained
+Dialogue: 0,0:01:52.47,0:02:01.32,Nanum Barun Gothic,,0,0,0,,Those days we spent running hand in hand
+Dialogue: 0,0:02:01.32,0:02:06.25,Nanum Barun Gothic,,0,0,0,,No matter how fierce the storm becomes
+Dialogue: 0,0:02:06.25,0:02:18.00,Nanum Barun Gothic,,0,0,0,,Please don't forget to find your courage.

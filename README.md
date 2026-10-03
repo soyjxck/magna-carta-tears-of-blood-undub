@@ -93,7 +93,6 @@ Raw dumps land at `build/cutscene-dumps/<region>/`; patched dumps at `build/cuts
 
 ## Known issues / to do
 
-- The Japanese patch's opening song isn't subtitled yet.
 - A few cutscene lines that exist only in the Japanese cut (not in the Korean script) currently play without an English subtitle; translating those is on the to-do list.
 
 ## How It Works (TL;DR)
