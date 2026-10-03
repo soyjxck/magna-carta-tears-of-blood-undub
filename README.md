@@ -93,7 +93,7 @@ Raw dumps land at `build/cutscene-dumps/<region>/`; patched dumps at `build/cuts
 
 ## Known issues / to do
 
-- The Japanese patch's opening song and end-credits roll aren't subtitled yet — the credits play the English staff roll without song lyrics.
+- The Japanese patch's opening song isn't subtitled yet.
 - A few cutscene lines that exist only in the Japanese cut (not in the Korean script) currently play without an English subtitle; translating those is on the to-do list.
 
 ## How It Works (TL;DR)
@@ -102,7 +102,7 @@ The game is built on Unreal Engine 2 with CRI's AFS archive format and SofDec MP
 
 The keystone discovery: SHIP.AFS slot 0 is a plaintext `(filename, decimal-size)` manifest the engine reads at boot to populate its file-size cache. When we swap USA bytes in but leave the manifest pointing at source-region sizes, the engine reads short and the parser overruns its buffer. Rebuilding the manifest with the hybrid's actual sizes is the fix that unlocks full English coverage on the world dialog (`.fpb`) and every other text format. The same trick applies to LINEAR.AFS for the texture overlay.
 
-Cutscenes use [`sfd-muxer`](https://github.com/soyjxck/sfd-muxer) — we demux source SFDs, re-encode video at 5500 kbps CBR with English subtitles (pre-shipped in `subs/`) burned in via libass, then mux back to a fresh SFD. The ending-credits cutscene (`189992`) keeps the USA English credit-roll video on **both** patches and swaps in the source-region ending song. On the KR patch it carries GXZ95's English song credits + lyrics burned over masked-out baked text; on the JP patch (whose credit roll runs ~68 s longer) the English roll is time-stretched to match the Japanese song, with no subtitles. See [TECHNICAL.md](TECHNICAL.md#cutscene-sfds) for details.
+Cutscenes use [`sfd-muxer`](https://github.com/soyjxck/sfd-muxer) — we demux source SFDs, re-encode video at 5500 kbps CBR with English subtitles (pre-shipped in `subs/`) burned in via libass, then mux back to a fresh SFD. The ending-credits cutscene (`189992`) keeps the USA English credit-roll video on **both** patches and swaps in the source-region ending song. Both carry GXZ95's English song credits + lyrics burned over masked-out baked text; on the JP patch the English roll is time-stretched to fit the longer Japanese ending song. See [TECHNICAL.md](TECHNICAL.md#cutscene-sfds) for details.
 
 Full reverse-engineering record in [TECHNICAL.md](TECHNICAL.md).
 

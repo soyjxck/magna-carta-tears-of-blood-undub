@@ -759,12 +759,25 @@ full source-region demux (`AUDIO_SWAP_CUTSCENES = {"189992"}` in
 
 **Per-region result.** KR's credit roll matches USA's length (~263.86 s),
 so no stretch is needed; it ships GXZ95's English song credits + lyrics
-burned in (see masking below). JP's roll runs ~68 s longer (~331.9 s), so
-the English roll is stretched ~1.26× to match the Japanese song; there is
-no `subs/japanese/189992.ass`, so the JP credits carry no subtitles.
-(Earlier versions gated the swap on `abs(usa_dur - src_dur) < 1.0` and fell
-back to the source roll for JP — the stretch replaces that fallback so both
-patches now show the English credit roll.)
+burned in (see masking below).
+
+JP's SFD runs 331.9 s, but only because JP's own credit *video* is longer —
+the JP audio track is 314.5 s and the song fades out by ~308 s. GXZ95's
+`subs/japanese/189992.ass` is timed to the USA roll stretched to exactly
+309.10 s (×1.1715), so that length is pinned in `AUDIO_SWAP_ROLL_LENGTH`
+rather than stretching to the container duration; the final frame is then
+held (`tpad`) until the audio ends. The lyrics follow the audio (identical
+to GXZ95's reference, sample-exact), and the song-credit overlays use the
+`Helvetica` style's `BorderStyle 3` opaque box — widened with invisible
+padding — as their mask over the baked USA "Tears of Blood" credits.
+
+GXZ95 authored that file against a display-aspect preview: the SFD has
+non-square pixels (SAR 200:219), so their player showed the picture ~8/9
+narrower. Burned into raw frames, the masks fell short of the wider baked
+text, so the shipped file has its overlay lines remapped to raw pixels
+(`raw_x = 1.125·x − 31`, `ScaleX` 85 → 95.625, `\q2` to stop wrapping),
+plus a ~4% narrowing of the two "Music Supervision & Sound Production"
+labels so they stay on-screen. Lyrics are unchanged.
 
 **Masking the baked credits (KR).** GXZ95's English song-credit overlays are
 narrower than the baked USA credit text they sit on top of, so the wider

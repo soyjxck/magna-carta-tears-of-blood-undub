@@ -56,12 +56,22 @@ KEEP_USA_CUTSCENES = frozenset({
 # roll) but mux the source-region *audio* underneath, burning subs on top
 # when an `.ass` exists. The ending credits (189992) want the English
 # credit names on screen plus the original-language ending song. When the
-# USA roll is shorter than the source song (e.g. JP's 189992 is a longer
-# roll), build_cutscene time-stretches the USA video to the source song's
-# length so the roll and song finish together — no freeze, no cut.
+# USA roll is shorter than the source song, build_cutscene time-stretches
+# the USA video so the roll and song finish together.
 AUDIO_SWAP_CUTSCENES = frozenset({
     "189992",  # ending credits — USA English roll + source song (+ lyric subs if present)
 })
+
+# Explicit stretched-roll length (seconds) per (source region, cutscene),
+# overriding the default of stretching to the source SFD's duration. JP's
+# 189992 container runs 332 s only because JP's own credit video is longer;
+# the song itself fades out by ~308 s. GXZ95's subs/japanese/189992.ass —
+# lyrics plus credit overlays whose opaque boxes mask the baked USA song
+# credits — is timed to the USA roll stretched to exactly this length, so it
+# must match. The final frame then holds until the source audio ends.
+AUDIO_SWAP_ROLL_LENGTH = {
+    ("jp", "189992"): 309.10,
+}
 
 SUB_DIR_FOR = {"kr": ROOT / "subs" / "korean",
                "jp": ROOT / "subs" / "japanese"}
@@ -134,13 +144,17 @@ def _demux_sfd_via_ffmpeg(sfd: Path, m1v: Path, sfa: Path, ffmpeg: Path) -> None
 
 
 def _hardsub_video(m1v_in: Path, m1v_out: Path, ass: Path | None, ffmpeg: Path,
-                   kbps: int = DEFAULT_VIDEO_KBPS, stretch: float = 1.0) -> None:
+                   kbps: int = DEFAULT_VIDEO_KBPS, stretch: float = 1.0,
+                   hold: float = 0.0) -> None:
     """Re-encode `m1v_in` as fixed-CBR mpeg1video. Burns `ass` via libass when
-    given, and time-stretches the picture by `stretch` (a PTS factor > 1 slows
-    it down) so an English credit roll can be matched to a longer source song."""
+    given, time-stretches the picture by `stretch` (a PTS factor > 1 slows it
+    down) so an English credit roll can be matched to a longer source song,
+    and holds the final frame for `hold` extra seconds."""
     filters = []
     if abs(stretch - 1.0) > 1e-3:
         filters.append(f"setpts=PTS*{stretch:.6f}")
+    if hold > 0:
+        filters.append(f"tpad=stop_mode=clone:stop_duration={hold:.3f}")
     if ass is not None:
         filters.append(f"ass={ass}")
     vf = ",".join(filters) if filters else "null"
@@ -175,6 +189,7 @@ class CutsceneJob:
     src_size: int
     usa_dur: float
     src_dur: float
+    region: str = ""        # source region, e.g. "kr" / "jp"
 
     @property
     def has_subs(self) -> bool:
@@ -214,6 +229,7 @@ def discover_jobs(usa_root: Path = ROOT / "work" / "usa",
                 src_size=src.stat().st_size,
                 usa_dur=_ffprobe_duration(usa, ffprobe),
                 src_dur=_ffprobe_duration(src, ffprobe),
+                region=src_root.name,
             ))
     return jobs
 
@@ -243,24 +259,29 @@ def build_cutscene(job: CutsceneJob, work_dir: Path, ffmpeg: Path,
 
     try:
         # Audio-swap scenes keep USA's English video over the source-region
-        # audio even with no subs (e.g. JP credits). When USA's video is
-        # shorter than the source song, stretch it to match so the roll and
-        # song finish together instead of drifting/cutting.
+        # audio even with no subs. When USA's roll is shorter than the source
+        # song, stretch it (to an explicit AUDIO_SWAP_ROLL_LENGTH if set, else
+        # the source duration) and hold the last frame until the audio ends.
         do_swap = hardsub and job.name in AUDIO_SWAP_CUTSCENES
         if hardsub and (job.has_subs or do_swap):
             m1v = wd / f"{job.name}.m1v"
             sfa = wd / f"{job.name}.sfa"
-            stretch = 1.0
+            stretch, hold = 1.0, 0.0
             if do_swap:
                 _demux_sfd_via_ffmpeg(job.usa_sfd, m1v, wd / f"{job.name}.usa.sfa", ffmpeg)
                 _demux_sfd_via_ffmpeg(job.src_sfd, wd / f"{job.name}.src.m1v", sfa, ffmpeg)
-                if job.usa_dur and abs(job.usa_dur - job.src_dur) > 1.0:
-                    stretch = job.src_dur / job.usa_dur
+                roll = AUDIO_SWAP_ROLL_LENGTH.get((job.region, job.name))
+                if roll is None and job.usa_dur and abs(job.usa_dur - job.src_dur) > 1.0:
+                    roll = job.src_dur
+                if roll is not None:
+                    stretch = roll / job.usa_dur
+                    audio_dur = _ffprobe_duration(sfa, _ffprobe_for(ffmpeg))
+                    hold = max(0.0, audio_dur - roll)
             else:
                 _demux_sfd_via_ffmpeg(job.src_sfd, m1v, sfa, ffmpeg)
             subbed = wd / f"{job.name}_subbed.m1v"
             _hardsub_video(m1v, subbed, job.ass if job.has_subs else None,
-                           ffmpeg, stretch=stretch)
+                           ffmpeg, stretch=stretch, hold=hold)
             SofdecMuxer(subbed, sfa).write(tmp)
         else:
             shutil.copyfile(job.src_sfd, tmp)
